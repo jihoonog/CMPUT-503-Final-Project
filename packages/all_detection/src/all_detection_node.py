@@ -90,8 +90,8 @@ class NumberDetectionNode(DTROS):
         self.rate = rospy.Rate(self.update_freq)
 
         # Publishers
-        self.pub_number_bb = rospy.Publisher(f"/{self.veh_name}/number_detection_node/image/compressed", CompressedImage, queue_size=1)
-        self.pub_cropped_number = rospy.Publisher(f"/{self.veh_name}/number_detection_node/cropped_number/image/compressed", CompressedImage, queue_size=1)
+        self.pub_number_bb = rospy.Publisher(f"/{self.veh_name}/all_detection_node/image/compressed", CompressedImage, queue_size=1)
+        self.pub_cropped_number = rospy.Publisher(f"/{self.veh_name}/all_detection_node/cropped_number/image/compressed", CompressedImage, queue_size=1)
         # Subscribers
         ## Subscribe to the lane_pose node
         self.sub_images = rospy.Subscriber(f"/{self.veh_name}/camera_node/image/compressed", CompressedImage, self.cb_image, queue_size=1)
@@ -103,7 +103,7 @@ class NumberDetectionNode(DTROS):
                 # Publishers
         ## Publish commands to the motors
         self.pub_motor_commands = rospy.Publisher(f'/{self.veh_name}/wheels_driver_node/wheels_cmd', WheelsCmdStamped, queue_size=1)
-        self.pub_shutdown_commands = rospy.Publisher(f'/{self.veh_name}/number_detection_node/shutdown_cmd', String, queue_size=1)
+        self.pub_shutdown_commands = rospy.Publisher(f'/{self.veh_name}/all_detection_node/shutdown_cmd', String, queue_size=1)
         #self.pub_motor_commands = rospy.Publisher(f'/state_control_node/command', String, queue_size=1)
         self.pub_car_cmd = rospy.Publisher(f'/{self.veh_name}/car_cmd_switch_node/cmd', Twist2DStamped, queue_size=1, dt_topic_type=TopicType.CONTROL)
 
@@ -157,7 +157,7 @@ class NumberDetectionNode(DTROS):
 
 
             time.sleep(2)
-            rospy.signal_shutdown("number_detection Node Shutdown command received")
+            rospy.signal_shutdown("all_detection Node Shutdown command received")
 
             #self.shutdown()
             #time.sleep(2)
@@ -243,16 +243,16 @@ class NumberDetectionNode(DTROS):
 
 
     def load_model(self):
-        #model_file_folder = self.rospack.get_path('number_detection') + '/config/MNIST_model.pt'
-        #model_file_folder = self.rospack.get_path('number_detection') + '/config/mnist_cnn0.pt'
+        #model_file_folder = self.rospack.get_path('all_detection') + '/config/MNIST_model.pt'
+        #model_file_folder = self.rospack.get_path('all_detection') + '/config/mnist_cnn0.pt'
         
-        model_file_folder = self.rospack.get_path('number_detection') + '/config/mnist_cnn0.pt'
+        model_file_folder = self.rospack.get_path('all_detection') + '/config/mnist_cnn0.pt'
 
         self.model.load_state_dict(torch.load(model_file_folder))
         #self.model.load_state_dict(torch.load(model_file_folder, map_location=torch.device('cpu')))
         self.model.eval()
 
-        model_file_folder = self.rospack.get_path('number_detection') + '/config/mnist_cnn_add_data_aug_5.pt'
+        model_file_folder = self.rospack.get_path('all_detection') + '/config/mnist_cnn_add_data_aug_5.pt'
 
         self.new_model.load_state_dict(torch.load(model_file_folder))
         #self.model.load_state_dict(torch.load(model_file_folder, map_location=torch.device('cpu')))
@@ -264,7 +264,7 @@ class NumberDetectionNode(DTROS):
         # self.frame_id = self.veh_name + '/camera_optical_frame'
         # self.cali_file = cali_file_folder + self.veh_name + ".yaml"
 
-        self.cali_file = self.rospack.get_path('number_detection') + f"/config/calibrations/camera_intrinsic/{self.veh_name}.yaml"
+        self.cali_file = self.rospack.get_path('all_detection') + f"/config/calibrations/camera_intrinsic/{self.veh_name}.yaml"
 
         # Locate calibration yaml file or use the default otherwise
         rospy.loginfo(f'Looking for calibration {self.cali_file}')
@@ -284,7 +284,7 @@ class NumberDetectionNode(DTROS):
     
     def get_extrinsic_filepath(self,name):
         #TODO: retrieve the calibration info from the right path.
-        cali_file_folder = self.rospack.get_path('number_detection')+'/config/calibrations/camera_extrinsic/'
+        cali_file_folder = self.rospack.get_path('all_detection')+'/config/calibrations/camera_extrinsic/'
 
         cali_file = cali_file_folder + name + ".yaml"
         return cali_file

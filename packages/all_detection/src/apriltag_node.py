@@ -83,7 +83,7 @@ class AprilTagNode(DTROS):
         self.buffer = tf2_ros.Buffer()
 
         self.buffer_listener = tf2_ros.TransformListener(self.buffer)
-        self.sub_shutdown_commands = rospy.Subscriber(f'/{self.veh}/number_detection_node/shutdown_cmd', String, self.shutdown, queue_size = 1)
+        self.sub_shutdown_commands = rospy.Subscriber(f'/{self.veh}/all_detection_node/shutdown_cmd', String, self.shutdown, queue_size = 1)
         
 
 
@@ -92,64 +92,11 @@ class AprilTagNode(DTROS):
         self.fusion_z = 0
 
         self.fusion_rotation_z = 0
- 
-     
-    def get_odom_location(self,req):
-        data = req.pose.pose
-        self.fusion_x = data.position.x
-        self.fusion_y = data.position.y
-        self.fusion_z = data.position.z
-        self.fusion_rotation_z = data.orientation.z
-
-    def draw_boundary(self,corners, image):
-        """
-        corners = [[375.08706665 209.4493866 ]
-            [445.62255859 212.48104858]
-            [453.69393921 136.50134277]
-            [377.13027954 138.41127014]]
-        
-        """
-        color = (0, 0, 255)
-        x_list, y_list = [],[]
-        for i in range(len(corners)-1):
-            start = (int(corners[i][0]),int(corners[i][1]))
-            end = (int(corners[i+1][0]),int(corners[i+1][1]))
-            cv2.line(image, start, end, color, 5)
-        
-        cv2.line(image, (int(corners[0][0]),int(corners[0][1])), 
-                        (int(corners[-1][0]),int(corners[-1][1])), color, 5)
-        return image
-
-    def add_text_to_img(self, tag_id, center, img):
-        font                   = cv2.FONT_HERSHEY_SIMPLEX
-        fontScale              = 0.5
-        fontColor              = (255,255,255)
-        thickness              = 1
-        lineType               = 2
-
-        text = "Others"
-        if tag_id in [63, 143, 58, 62, 133, 153]:
-            # T-intersection
-            text = "T-intersection"
-
-        elif tag_id in [162,169]:
-            # Stop sign
-            text = "Stop sign"
-
-        elif tag_id in [93,94,200,201]:
-            # U of A sign
-            text = "U of A"
+        self.tag_map = {48:"Right",50:"Left",56:"Straight",
+         163:"Duckwalk", 207:"parking 1", 226: "parking 2", 
+         228:"parking 3",75:"parking 4",227:"parking entrance"}
 
 
-        cv2.putText(img,text, 
-            (int(center[0]),int(center[1])), 
-            font, 
-            fontScale,
-            fontColor,
-            thickness,
-            lineType)
-
-        return img
 
     def transform_camera_view(self,pose_t,pose_R):
         static_transformStamped = geometry_msgs.msg.TransformStamped()
@@ -220,46 +167,62 @@ class AprilTagNode(DTROS):
         # Convert to grey image and distort it.
         dis = self.augmenter.process_image(self.raw_image)
         new_img = dis
-        if self.frequency_control % 10 == 0:
+        if self.frequency_control % 5 == 0:
 
-            tags = self.at_detector.detect(dis, estimate_tag_pose=True, camera_params=self.camera_params, tag_size=0.065) # returns list of detection objects
+            tags = self.at_detector.detect(dis, estimate_tag_pose=False, camera_params=self.camera_params, tag_size=0.065) # returns list of detection objects
 
             
             detection_threshold = 10 # The target margin need to be larger than this to get labelled.
-            z_threshold = 1 # in meters
             
             if len(tags) == 0:
                 # Means there's no tags present. Set the led to white.
                 self.pub_tag_id.publish(-1)    
+                #pass
             else:
-                distance_list = []
+                margin_list = []
                 tag_list = []
+                max_margin = 0
+                max_tag_id = 0
+
 
                 for tag in tags:
+                    if tag.decision_margin > max_margin:
+                        max_margin = tag.decision_margin
+                        max_tag_id = tag.tag_id
                     
                     #print(tag)
-                    z = tag.pose_t[2][0]
-                    #print(tag.tag_id, tag.decision_margin)
-                    if tag.decision_margin < detection_threshold or z > z_threshold:
-                        continue
+                    # z = tag.pose_t[2][0]
+                    # #print(tag.tag_id, tag.decision_margin)
+                    # if tag.decision_margin < detection_threshold or z > z_threshold:
+                    #     continue
                     #print(tag.pose_t)
                     # Change led light according to the tag type.
                     
                     
-                    distance_list.append(tag.pose_t[2][0])
-                    tag_list.append(tag)
+                    #distance_list.append(tag.pose_t[2][0])
+                    #tag_list.append(max_tag_id)
+                    #margin_list.append(tag.decision_margin)
+                    
 
-                if len(distance_list) != 0:
-                    # If tag detected:
-                    closest_tag_idx = argmin(distance_list)
-                    #print("argmin",closest_tag_idx)
-                    tag = tag_list[closest_tag_idx]
+                
 
-                    # Draw bounding box/
-                    self.transform_camera_view(tag.pose_t,tag.pose_R)
-                    # Now here you can get the ground truth location and yaw, use it to modify your odometry.
-                    tag_name = tag.tag_id
-                    self.pub_tag_id.publish(tag_name)
+                print(self.tag_map[int(max_tag_id)])
+                self.pub_tag_id.publish(max_tag_id)
+                
+                # if len(distance_list) != 0:
+                #     # If tag detected:
+                #     closest_tag_idx = argmin(distance_list)
+                #     #print("argmin",closest_tag_idx)
+                #     tag = tag_list[closest_tag_idx]
+
+                #     # Draw bounding box/
+                #     #self.transform_camera_view(tag.pose_t,tag.pose_R)
+                #     # Now here you can get the ground truth location and yaw, use it to modify your odometry.
+                #     tag_name = tag.tag_id
+                #     #self.pub_tag_id.publish(tag_name)
+                    
+
+                    
 
         self.frequency_control +=1
         # make new CompressedImage to publish
@@ -276,7 +239,7 @@ class AprilTagNode(DTROS):
 
     def get_extrinsic_filepath(self,name):
         #TODO: retrieve the calibration info from the right path.
-        cali_file_folder = self.rospack.get_path('number_detection')+'/config/calibrations/camera_extrinsic/'
+        cali_file_folder = self.rospack.get_path('all_detection')+'/config/calibrations/camera_extrinsic/'
 
         cali_file = cali_file_folder + name + ".yaml"
         return cali_file
@@ -315,7 +278,7 @@ class AprilTagNode(DTROS):
         # self.frame_id = self.veh + '/camera_optical_frame'
         # self.cali_file = cali_file_folder + self.veh + ".yaml"
 
-        self.cali_file = self.rospack.get_path('number_detection') + f"/config/calibrations/camera_intrinsic/{self.veh}.yaml"
+        self.cali_file = self.rospack.get_path('all_detection') + f"/config/calibrations/camera_intrinsic/{self.veh}.yaml"
 
         # Locate calibration yaml file or use the default otherwise
         rospy.loginfo(f'Looking for calibration {self.cali_file}')

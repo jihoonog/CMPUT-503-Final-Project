@@ -1,0 +1,7 @@
+<launch>
+
+    <arg name="pkg_name" value="all_detection"/>
+    <node  name="apriltag_node" pkg="$(arg pkg_name)" type="apriltag_node.py" output="screen" ></node>
+
+    <!--<node  name="all_detection_node" pkg="$(arg pkg_name)" type="all_detection_node.py" output="screen" ></node>-->
+</launch>

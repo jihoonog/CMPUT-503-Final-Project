@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <package>
-  <name>number_detection</name>
+  <name>all_detection</name>
   <version>1.0.0</version>
   <description>Number detection package for exercise-5</description>
 

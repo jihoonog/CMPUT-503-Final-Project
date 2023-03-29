@@ -13,7 +13,7 @@ dt-launchfile-init
 # NOTE: Use `dt-exec COMMAND` to run the main process (blocking process)
 
 # launching app
-dt-exec roslaunch number_detection number_detection_node.launch
+dt-exec roslaunch all_detection all_detection.launch
 sleep 3
 dt-exec roslaunch duckiebot_circuit duckiebot_circuit_node.launch
 

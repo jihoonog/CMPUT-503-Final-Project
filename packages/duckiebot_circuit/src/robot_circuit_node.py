@@ -92,6 +92,7 @@ class RobotCircuitNode(DTROS):
         self.stop_time = 0.0
         self.process_intersection = False
         self.tag_id = -1
+        self.action_done = False
 
 
         
@@ -104,8 +105,10 @@ class RobotCircuitNode(DTROS):
         ## Subscribe to the lane_pose node
         self.sub_lane_reading = rospy.Subscriber(f"/{self.veh_name}/lane_filter_node/lane_pose", LanePose, self.cb_lane_pose, queue_size = 1)
         self.sub_segment_list = rospy.Subscriber(f"/{self.veh_name}/line_detector_node/segment_list", SegmentList, self.cb_segments, queue_size=1)
-        #self.sub_tag_id = rospy.Subscriber(f"/{self.veh_name}/tag_id", Int32, self.cb_tag_id, queue_size=1)
+        self.sub_tag_id = rospy.Subscriber(f"/{self.veh_name}/tag_id", Int32, self.cb_tag_id, queue_size=1)
         self.sub_shutdown_commands = rospy.Subscriber(f'/{self.veh_name}/number_detection_node/shutdown_cmd', String, self.shutdown, queue_size = 1)
+
+        #self.april_tag = -1
 
         self.log("Initialized")
 
@@ -150,9 +153,18 @@ class RobotCircuitNode(DTROS):
 
     
     def cb_tag_id(self, tag_msg):
-        if tag_msg.data != -1:
-            self.tag_id = tag_msg.data
-            # print(self.tag_id)
+        #print("tag_msg",tag_msg)
+
+        # Means no target detected.
+        if tag_msg.data == -1:
+            self.tag_id = -1
+
+        else:
+            # New action coming.
+            if tag_msg.data != self.tag_id and self.action_done:
+                self.tag_id = tag_msg.data
+                self.action_done = False
+
         
     def veh_leader_info(self):
         if self.vehicle_detected:
