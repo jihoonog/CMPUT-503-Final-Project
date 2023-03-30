@@ -41,6 +41,7 @@ class ObstacleDetectionNode(DTROS):
         self.sub_image = rospy.Subscriber( f'/{self.veh}/camera_node/image/compressed',CompressedImage,self.processImage, queue_size=1)
         #rospy.Subscriber("~corrected_image/compressed", CompressedImage, self.processImage, queue_size=1)
         self.sub_filtered_seglist = rospy.Subscriber(f"/{self.veh}/lane_filter_node/seglist_filtered", SegmentList, self.filtered_seglist_cb)
+        self.upper_bound = -1
 
     def filtered_seglist_cb(self, seglist_msg):
         #print("In",filtered_seglist_cb)
@@ -216,10 +217,15 @@ class ObstacleDetectionNode(DTROS):
             #print('object detected')
             red_area = max(cnts, key=cv2.contourArea)
             (xg,yg,wg,hg) = cv2.boundingRect(red_area)
+            if yg<120 or yg > 400:
+
+                return
+
             box_img = cv2.rectangle(image_cv,(xg,yg),(xg+wg, yg+hg),(0,255,0),2)
-            print('BEFORE X', [xg, xg+wg], " BEFORE Y", [yg+hg, yg+hg])
+            #print(xg,yg,wg,hg)
+            #print('BEFORE X', [xg, xg+wg], " BEFORE Y", [yg+hg, yg+hg])
             x_arr, y_arr = self.point2ground([xg, xg+wg], [yg + hg, yg + hg], image_size[0], image_size[1])
-            print("BOTTOM OF ROBOT : X ", x_arr, ' Y :', y_arr)
+            #print("BOTTOM OF ROBOT : X ", x_arr, ' Y :', y_arr)
             if x_arr[0] < 0.35:
                 print("STOP THE Bot")
                 self.stop = True
