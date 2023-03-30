@@ -2,10 +2,10 @@
 <package>
   <name>all_detection</name>
   <version>1.0.0</version>
-  <description>Number detection package for exercise-5</description>
+  <description>detection package for project</description>
 
-  <maintainer email="og@ualberta.ca"> JIhoon </maintainer>
-  <author email="og@ualberta.ca"> Jihoon </author>
+  <maintainer email="qianxi@ualberta.ca"> Qianxi </maintainer>
+  <author email="qianxi@ualberta.ca"> Qianxi </author>
 
   <license>GPLv3</license>
 
