@@ -4,7 +4,7 @@ import numpy as np
 from duckietown_msgs.msg import Twist2DStamped, LanePose, SegmentList, Segment
 from geometry_msgs.msg import Point
 from duckietown.dtros import DTROS, NodeType, TopicType, DTParam, ParamType
-from std_msgs.msg import String
+from std_msgs.msg import String,Int32
 from sensor_msgs.msg import CompressedImage, Image
 from duckietown_utils.jpg import bgr_from_jpg
 import cv2
@@ -38,6 +38,7 @@ class ObstacleDetectionNode(DTROS):
         self.bridge = CvBridge()
 
         self.stop = False
+        self.pub_duckie_detected = rospy.Publisher(f'/{self.veh}/duckie_detected', Int32, queue_size=1)
         self.sub_image = rospy.Subscriber( f'/{self.veh}/camera_node/image/compressed',CompressedImage,self.processImage, queue_size=1)
         #rospy.Subscriber("~corrected_image/compressed", CompressedImage, self.processImage, queue_size=1)
         self.sub_filtered_seglist = rospy.Subscriber(f"/{self.veh}/lane_filter_node/seglist_filtered", SegmentList, self.filtered_seglist_cb)
@@ -218,7 +219,7 @@ class ObstacleDetectionNode(DTROS):
             red_area = max(cnts, key=cv2.contourArea)
             (xg,yg,wg,hg) = cv2.boundingRect(red_area)
             if yg<120 or yg > 400:
-
+                self.pub_duckie_detected.publish(-1)
                 return
 
             box_img = cv2.rectangle(image_cv,(xg,yg),(xg+wg, yg+hg),(0,255,0),2)
@@ -231,6 +232,7 @@ class ObstacleDetectionNode(DTROS):
                 self.stop = True
             else:
                 self.stop = False
+            self.pub_duckie_detected.publish(1)
             image_msg_out = self.bridge.cv2_to_imgmsg(box_img, "bgr8")
             image_msg_out.header.stamp = image_msg.header.stamp
             self.pub_image.publish(image_msg_out)
@@ -239,6 +241,7 @@ class ObstacleDetectionNode(DTROS):
             image_msg_out = self.bridge.cv2_to_imgmsg(image_cv, "bgr8")
             image_msg_out.header.stamp = image_msg.header.stamp
             self.pub_image.publish(image_msg_out)
+            self.pub_duckie_detected.publish(-1)
         
         #print('Time to process', time.time() - start_time)
 
