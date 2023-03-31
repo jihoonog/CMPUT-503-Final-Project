@@ -59,14 +59,14 @@ class RobotCircuitNode(DTROS):
         self.rate = rospy.Rate(self.update_freq)
         self.d_offset = 0.0
         self.lane_controller_parameters = {
-            "Kp_d": 10.5,
-            "Ki_d": 0.5,
-            "Kd_d": 1.0,
-            "Kp_theta": 7.5,
+            "Kp_d": 2.0,
+            "Ki_d": 0.0,
+            "Kd_d": 0.04,
+            "Kp_theta": 1.5,
             "Ki_theta": 0.0,
-            "Kd_theta": 1.0,
+            "Kd_theta": 0.005,
             "sample_time": 1.0 / self.update_freq,
-            "d_bounds": (-4.5, 4.5),
+            "d_bounds": (-3.5, 3.5),
             "theta_bounds": (-3.5,3.5),
         }
         self.seq = [0,-1,1,0,1,-1]
@@ -76,7 +76,7 @@ class RobotCircuitNode(DTROS):
         self.min_segs = 20  # minimum number of red segments that we should detect to estimate a stop
         self.off_time = 2.0 # time to wait after we have passed the stop line
         self.max_y = 0.10   # If y value of detected red line is smaller than max_y we will not set at_stop_line true.
-        self.stop_hist_len = 10
+        self.stop_hist_len = 5
         self.stop_duration = 1
         self.stop_cooldown = 6 # The stop cooldown
 
@@ -153,7 +153,7 @@ class RobotCircuitNode(DTROS):
 
     
     def cb_tag_id(self, tag_msg):
-        #print("tag_msg",tag_msg)
+        print("tag_msg",tag_msg)
 
         # Means no target detected.
         if tag_msg.data == -1:
@@ -161,7 +161,7 @@ class RobotCircuitNode(DTROS):
 
         else:
             # New action coming.
-            if tag_msg.data != self.tag_id and self.action_done:
+            if tag_msg.data != self.tag_id:
                 self.tag_id = tag_msg.data
                 self.action_done = False
 
@@ -214,19 +214,13 @@ class RobotCircuitNode(DTROS):
             self.car_cmd(v, omega, pose_msg)
             rospy.sleep(self.stop_duration)
         elif self.process_intersection:
-            intersection_seq = self.seq[self.seq_idx]
-            if intersection_seq == -1:
-                print("Turning left")
-                self.turn_left(pose_msg)
-            elif intersection_seq == 1:
-                print("Turning right")
+            if self.tag_id == 48:
                 self.turn_right(pose_msg)
+            elif self.tag_id == 50:
+                self.turn_left(pose_msg)
             else:
-                print("Going straight")
                 self.go_straight(pose_msg)
-            self.seq_idx += 1
-            if self.seq_idx > 5:
-                self.seq_idx = 0
+
             self.process_intersection = False
             
         else:
@@ -240,7 +234,7 @@ class RobotCircuitNode(DTROS):
         car_control_msg.header = lane_pose.header
 
         car_control_msg.v = v
-        car_control_msg.omega = omega * 1.5
+        car_control_msg.omega = omega * 3.0
         self.pub_car_cmd.publish(car_control_msg)
     
     def turn_right(self, pose_msg):
