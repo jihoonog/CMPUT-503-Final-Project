@@ -90,6 +90,7 @@ class AprilTagNode(DTROS):
         self.fusion_x = 0
         self.fusion_y = 0
         self.fusion_z = 0
+        self.br = CvBridge()
 
         self.fusion_rotation_z = 0
         self.tag_map = {48:"Right",50:"Left",56:"Straight",
@@ -161,9 +162,9 @@ class AprilTagNode(DTROS):
     def project(self, msg):
 
         
-        br = CvBridge()
+        
         # Convert image to cv2 image.
-        self.raw_image = br.compressed_imgmsg_to_cv2(msg)
+        self.raw_image = self.br.compressed_imgmsg_to_cv2(msg)
         # Convert to grey image and distort it.
         dis = self.augmenter.process_image(self.raw_image)
         new_img = dis
