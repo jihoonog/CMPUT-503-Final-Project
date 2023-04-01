@@ -59,15 +59,15 @@ class RobotCircuitNode(DTROS):
         self.rate = rospy.Rate(self.update_freq)
         self.d_offset = 0.0
         self.lane_controller_parameters = {
-            "Kp_d": 2.0,
-            "Ki_d": 0.0,
-            "Kd_d": 0.04,
-            "Kp_theta": 1.5,
+            "Kp_d": 7.0,
+            "Ki_d": 0.5,
+            "Kd_d": 0.0,
+            "Kp_theta": 7.0,
             "Ki_theta": 0.0,
-            "Kd_theta": 0.005,
+            "Kd_theta": 0.0,
             "sample_time": 1.0 / self.update_freq,
-            "d_bounds": (-3.5, 3.5),
-            "theta_bounds": (-3.5,3.5),
+            "d_bounds": (-0.3, 0.3),
+            "theta_bounds": (-1.3,1.3),
         }
         self.seq = [0,-1,1,0,1,-1]
         self.seq_idx = 0
@@ -83,6 +83,7 @@ class RobotCircuitNode(DTROS):
         # Initialize variables
         self.lane_pose = LanePose()
         self.lane_pid_controller = LaneController(self.lane_controller_parameters)
+        self.start_condition = True
         ## For stop line detection
         self.stop_line_distance = None
         self.stop_line_detected = False
@@ -201,9 +202,15 @@ class RobotCircuitNode(DTROS):
 
         # self.veh_leader_info()
 
+        if self.start_condition:
+            self.go_straight(pose_msg)
+            rospy.sleep(2)
+            self.start_condition = False
+
         curr_time = rospy.get_time()
 
         stop_time_diff = curr_time - self.stop_time
+
 
         if (self.cmd_stop and stop_time_diff > self.stop_cooldown):
             self.stop_time = curr_time
@@ -215,10 +222,13 @@ class RobotCircuitNode(DTROS):
             rospy.sleep(self.stop_duration)
         elif self.process_intersection:
             if self.tag_id == 48:
+                print("Gping right")
                 self.turn_right(pose_msg)
             elif self.tag_id == 50:
+                print("Going left")
                 self.turn_left(pose_msg)
             else:
+                print("Going straight")
                 self.go_straight(pose_msg)
 
             self.process_intersection = False
@@ -234,7 +244,7 @@ class RobotCircuitNode(DTROS):
         car_control_msg.header = lane_pose.header
 
         car_control_msg.v = v
-        car_control_msg.omega = omega * 3.0
+        car_control_msg.omega = omega * 5.0
         self.pub_car_cmd.publish(car_control_msg)
     
     def turn_right(self, pose_msg):
