@@ -36,7 +36,7 @@ class LaneFollowNode(DTROS):
                                     queue_size=1,
                                     buff_size="20MB")
         self.sub_reset = rospy.Subscriber("/" + self.veh + "/lane_follow_node/reset",
-                                            Float32,
+                                            Bool,
                                             self.reset_callback,
                                             queue_size=1)
         
@@ -44,10 +44,6 @@ class LaneFollowNode(DTROS):
                                             Bool,
                                             self.english_callback,
                                             queue_size=1)
-        
-        self.vel_pub = rospy.Publisher("/" + self.veh + "/car_cmd_switch_node/cmd",
-                                       Twist2DStamped,
-                                       queue_size=1)
         
         self.pub_vel_cmd = rospy.Publisher(f'/{self.veh}/lane_follow_node/car_cmd', Twist2DStamped, queue_size=1)
 
@@ -73,8 +69,6 @@ class LaneFollowNode(DTROS):
         # Wait a little while before sending motor commands
         rospy.Rate(0.20).sleep()
 
-        # Shutdown hook
-        rospy.on_shutdown(self.hook)
 
     def reset_callback(self, msg):
         boolean = msg.data
@@ -151,16 +145,7 @@ class LaneFollowNode(DTROS):
             if DEBUG:
                 self.loginfo(self.proportional, P, D, self.twist.omega, self.twist.v)
 
-        self.vel_pub.publish(self.twist)
         self.pub_vel_cmd.publish(self.twist)
-
-    def hook(self):
-        print("SHUTTING DOWN")
-        self.twist.v = 0
-        self.twist.omega = 0
-        self.vel_pub.publish(self.twist)
-        for i in range(8):
-            self.vel_pub.publish(self.twist)
 
 
 if __name__ == "__main__":
