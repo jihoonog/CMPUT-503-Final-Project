@@ -13,12 +13,12 @@ dt-launchfile-init
 # NOTE: Use `dt-exec COMMAND` to run the main process (blocking process)
 
 # launching app
-dt-exec roslaunch all_detection all_detection.launch
-dt-exec roslaunch purepursuit purepursuit_controller.launch
+# dt-exec roslaunch all_detection all_detection.launch
+# dt-exec roslaunch purepursuit purepursuit_controller.launch
 
 #sleep 3
-dt-exec roslaunch duckiebot_circuit duckiebot_circuit_node.launch
-
+# dt-exec roslaunch duckiebot_circuit duckiebot_circuit_node.launch
+dt-exec roslaunch lane_follow lane_follow_node.launch
 
 # ----------------------------------------------------------------------------
 # YOUR CODE ABOVE THIS LINE
