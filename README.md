@@ -16,8 +16,4 @@ Then you can run the program by running this at the repo's root:
 dts devel build -f -H $BOT && dts devel run -H $BOT
 ```
 
-If pulling, and building the images are taking too long you can build and run the container locally by running this instead:
-
-```bash
-dts devel build -f && dts devel run -R $BOT
-```
+You must run this project on the robot itself.
