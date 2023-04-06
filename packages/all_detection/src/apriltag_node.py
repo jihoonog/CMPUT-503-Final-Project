@@ -172,7 +172,6 @@ class AprilTagNode(DTROS):
 
             tags = self.at_detector.detect(dis, estimate_tag_pose=False, camera_params=self.camera_params, tag_size=0.065) # returns list of detection objects
 
-            
             detection_threshold = 10 # The target margin need to be larger than this to get labelled.
             
             if len(tags) == 0:

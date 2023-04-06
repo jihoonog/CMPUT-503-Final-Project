@@ -54,15 +54,15 @@ class LaneFollowNode(DTROS):
         # PID Variables
         self.proportional = None
         if ENGLISH:
-            self.offset = -240
+            self.offset = -230
         else:
-            self.offset = 240
+            self.offset = 230
         self.velocity = 0.3
         self.twist = Twist2DStamped(v=self.velocity, omega=0)
 
-        self.P = 0.04
-        self.D = -0.004
-        self.I = 0.008
+        self.P = 0.0466
+        self.D = -0.005
+        self.I = 0.009
         self.last_error = 0
         self.last_time = rospy.get_time()
 
@@ -143,7 +143,7 @@ class LaneFollowNode(DTROS):
             self.twist.v = self.velocity
             self.twist.omega = P + I + D
             if DEBUG:
-                self.loginfo(self.proportional, P, D, self.twist.omega, self.twist.v)
+                self.loginfo(f"{self.proportional}, {P}, {D}, {self.twist.omega}, {self.twist.v}")
 
         self.pub_vel_cmd.publish(self.twist)
 

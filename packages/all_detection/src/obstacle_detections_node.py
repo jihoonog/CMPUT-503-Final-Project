@@ -228,7 +228,7 @@ class ObstacleDetectionNode(DTROS):
             x_arr, y_arr = self.point2ground([xg, xg+wg], [yg + hg, yg + hg], image_size[0], image_size[1])
             #print("BOTTOM OF ROBOT : X ", x_arr, ' Y :', y_arr)
             if x_arr[0] < 0.35:
-                # print("STOP THE Bot")
+                print("STOP THE Bot")
                 self.stop = True
             else:
                 self.stop = False
