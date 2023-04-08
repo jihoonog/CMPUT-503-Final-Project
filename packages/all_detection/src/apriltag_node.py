@@ -70,7 +70,7 @@ class AprilTagNode(DTROS):
         # initialise the apriltag detector
         self.at_detector = Detector(searchpath=['apriltags'],
                            families='tag36h11',
-                           nthreads=4,
+                           nthreads=1,
                            quad_decimate=2,
                            quad_sigma=0.0,
                            refine_edges=1,
@@ -93,9 +93,15 @@ class AprilTagNode(DTROS):
         self.br = CvBridge()
 
         self.fusion_rotation_z = 0
-        self.tag_map = {48:"Right",50:"Left",56:"Straight",
-         163:"Duckwalk", 207:"parking 1", 226: "parking 2", 
-         228:"parking 3",75:"parking 4",227:"parking entrance"}
+        self.tag_map = {
+            48:"Right", 94:"Right", 
+            50:"Left", 169: "Left", 
+            56:"Straight", 200: "Straight",
+            163:"Duckwalk", 21: "Duckwalk",
+            227:"parking entrance",
+            207:"parking 1", 226: "parking 2", 
+            228:"parking 3",75:"parking 4",
+        }
 
 
 
@@ -206,7 +212,7 @@ class AprilTagNode(DTROS):
 
                 
 
-                print(self.tag_map[int(max_tag_id)])
+                # print(self.tag_map[int(max_tag_id)])
                 self.pub_tag_id.publish(max_tag_id)
                 
                 # if len(distance_list) != 0:

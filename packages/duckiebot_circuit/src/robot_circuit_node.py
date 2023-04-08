@@ -31,10 +31,11 @@ from duckietown_msgs.msg import (
     )
 from duckietown_msgs.srv import SetCustomLEDPattern
 from std_msgs.msg import Header, Float32, String, Float64MultiArray, Float32MultiArray, Int32, Bool
-from sensor_msgs.msg import CompressedImage
+from sensor_msgs.msg import CompressedImage, Range
 from geometry_msgs.msg import Point32
 from nav_msgs.msg import Odometry
-
+from turbojpeg import TurboJPEG 
+import cv2
 import rosbag
 
 
@@ -66,15 +67,28 @@ class RobotCircuitNode(DTROS):
             Ki=0.0,
             Kd=0.1,
             setpoint=0.25,
-            sample_time= 1.0 / self.update_freq,
+            sample_time= 0.01,
             output_limits=(0.0, 0.5)
         )
+        self.d_offset = 0.0
+        self.lane_controller_parameters = {
+            "Kp_d": 7.0,
+            "Ki_d": 0.75,
+            "Kd_d": 0.125,
+            "Kp_theta": 5.0,
+            "Ki_theta": 0.25,
+            "Kd_theta": 0.025,
+            "sample_time": 0.01,
+            "d_bounds": (-2.0, 2.0),
+            "theta_bounds": (-2.0,2.0),
+        }
+
         ## for stop line detection
         self.stop_distance = 0.15 # distance from the stop line that we should stop
         self.min_segs = 20  # minimum number of red segments that we should detect to estimate a stop
         self.off_time = 2.0 # time to wait after we have passed the stop line
         self.max_y = 0.10   # If y value of detected red line is smaller than max_y we will not set at_stop_line true.
-        self.stop_hist_len = 4
+        self.stop_hist_len = 6
         self.stop_duration = 1
         self.stop_cooldown = 6 # The stop cooldown
         ## For duckiebot detection and avoidance
@@ -83,10 +97,9 @@ class RobotCircuitNode(DTROS):
 
         # Initialize variables
         self.lane_pose = LanePose()
+        self.lane_pid_controller = LaneController(self.lane_controller_parameters)
         self.first_start = True
-        ## lane following stuff
-        self.lane_follow_omega = 0.0
-        self.lane_follow_v = 0.0
+        self.jpeg = TurboJPEG()
         ## For stop line detection
         self.stop_line_distance = None
         self.stop_line_detected = False
@@ -104,16 +117,14 @@ class RobotCircuitNode(DTROS):
         self.vehicle_detected = False
         self.english_driver_time = 0.0
         self.english_driver = False
-        ## for velocity control
-        self.tv = 0.0
+
         
         # Publishers
         ## Publish commands to the motors
         self.pub_motor_commands = rospy.Publisher(f'/{self.veh_name}/wheels_driver_node/wheels_cmd', WheelsCmdStamped, queue_size=1)
         self.pub_car_cmd = rospy.Publisher(f'/{self.veh_name}/car_cmd_switch_node/cmd', Twist2DStamped, queue_size=1)
+        self.pub_duckiewalk = rospy.Publisher(f'{self.veh_name}/duckiewalk/image/compressed', CompressedImage, queue_size=1)
         ## (re)set lane controller parameters
-        self.pub_reset_lane_follow = rospy.Publisher(f'/{self.veh_name}/lane_follow_node/reset', Bool, queue_size=1)
-        self.pub_english_lane_follow = rospy.Publisher(f'/{self.veh_name}/lane_follow_node/english', Bool, queue_size=1)
 
         # Subscribers
         ## Subscribe to the lane_pose node
@@ -121,17 +132,16 @@ class RobotCircuitNode(DTROS):
         self.sub_segment_list = rospy.Subscriber(f"/{self.veh_name}/line_detector_node/segment_list", SegmentList, self.cb_segments, queue_size=1)
         self.sub_tag_id = rospy.Subscriber(f"/{self.veh_name}/tag_id", Int32, self.cb_tag_id, queue_size=1)
         self.sub_shutdown_commands = rospy.Subscriber(f'/{self.veh_name}/number_detection_node/shutdown_cmd', String, self.shutdown, queue_size = 1)
-        self.sub_lane_follow = rospy.Subscriber(f'/{self.veh_name}/lane_follow_node/car_cmd', Twist2DStamped, self.cb_lane_follow, queue_size = 1)
         self.sub_duckie_detected = rospy.Subscriber(f'/{self.veh_name}/duckie_detected', Int32, self.cb_duckie_detected, queue_size = 1)
-        self.sub_detection = rospy.Subscriber(f"/{self.veh_name}/duckiebot_detection_node/detection", BoolStamped, self.cb_detection, queue_size=1)
-        self.sub_distance_to_robot_ahead = rospy.Subscriber(f"/{self.veh_name}/duckiebot_distance_node/distance", Float32, self.cb_vehicle_distance, queue_size=1)
-        # self.sub_odom = rospy.Subscriber = rospy.Subscriber(f"/{self.veh_name}/deadreckoning_node/odom", Odometry, self.cb_odom, queue_size=1)
-        #self.april_tag = -1
+        self.sub_range_finder = rospy.Subscriber(f'/{self.veh_name}/front_center_tof_driver_node/range', Range, self.cb_range_finder, queue_size = 1)
+        self.sub_camera = rospy.Subscriber(f'/{self.veh_name}/camera_node/image/compressed', CompressedImage, self.cb_duckiewalk_detector, queue_size=1, buff_size="20MB")
+        self.april_tag = -1
 
         rospy.on_shutdown(self.custom_shutdown)
             
-        rospy.sleep(1)
         self.log("Initialized")
+        rospy.sleep(1.0)
+        self.lane_pid_controller.reset_controller()
 
     # Start of callback functions
     def cb_segments(self, segment_list_msg):
@@ -167,25 +177,49 @@ class RobotCircuitNode(DTROS):
         
         self.process_stop_line(at_stop_line)
 
+    def cb_duckiewalk_detector(self, image_msg):
+        img = self.jpeg.decode(image_msg.data)
+        crop = img[200:-1, :, :]
+        hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+        mask = cv2.inRange(hsv, (90,87,100), (142,255,255))
+        crop = cv2.bitwise_and(crop, crop, mask=mask)
+        contours, hierarchy = cv2.findContours(mask,cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        max_area = 20
+        max_idx = -1
+        for i in range(len(contours)):
+            area = cv2.contourArea(contours[i])
+            if area > max_area:
+                max_idx = i
+                max_area = area
+        
+        if max_idx != -1:
+            M = cv2.moments(contours[i])
+            try:
+                cx = int(M['m10'] / M['m00'])
+                cy = int(M['m01'] / M['m00'])
+                cv2.drawContours(crop, contours, max_idx, (0, 255, 0), 3)
+                cv2.circle(crop, (cx, cy), 7, (0, 0, 255), -1)
+                rect_img_msg = CompressedImage(format='jpeg', data=self.jpeg.encode(crop))
+                self.pub_duckiewalk.publish(rect_img_msg)
+                print(cy)
+            except:
+                pass
+        
+        self.rate.sleep()
+
+
     def cb_lane_pose(self, input_pose_msg):
         self.lane_pose = input_pose_msg
+        self.get_control_action()
 
-    def cb_lane_follow(self, lane_follow_msg):
-        self.lane_follow_omega = lane_follow_msg.omega
-        self.lane_follow_v = lane_follow_msg.v
-    
     def cb_duckie_detected(self, duckie_detected_msg):
-        value = duckie_detected_msg.data
-        # if value == 1:
-        #     self.duckie_detected = True
-        # else:
-        #     self.duckie_detected = False
-    
-    def cb_odom(self, odom_msg):
-        self.tv = odom_msg.twist.twist.linear.x
+        self.duckie_detected = duckie_detected_msg.data
+
+    def cb_range_finder(self, range_msg):
+        self.vehicle_distance = range_msg.range
 
     def cb_tag_id(self, tag_msg):
-        print("tag_msg",tag_msg)
 
         # Means no target detected.
         if tag_msg.data == -1:
@@ -194,19 +228,15 @@ class RobotCircuitNode(DTROS):
         else:
             # New action coming.
             if tag_msg.data != self.tag_id:
+                print("tag_msg",tag_msg)
                 self.tag_id = tag_msg.data
                 self.action_done = False
 
-    def cb_detection(self, detection_msg):
-        self.vehicle_detected = detection_msg.data
-
-    def cb_vehicle_distance(self, distance_msg):
-        self.vehicle_distance = distance_msg.data
 
     ## end of callback functions
 
     def vehicle_ahead(self):
-        if self.vehicle_detected and self.vehicle_distance < self.safe_distance:
+        if self.tag_id == 163 and self.vehicle_distance < self.safe_distance:
             return True
         else:
             return False
@@ -230,6 +260,7 @@ class RobotCircuitNode(DTROS):
         else:
             self.cmd_stop = False
 
+
     def get_control_action(self):
         """
         Callback function that receives a pose message and updates the related control command
@@ -238,14 +269,8 @@ class RobotCircuitNode(DTROS):
 
         stop_time_diff = curr_time - self.stop_time
         english_driver_time_diff = curr_time - self.english_driver_time
-
-        # if self.first_start:
-        #     self.reset_lane_controller()
-        #     v = 0.3
-        #     omega = 0.0
-        #     self.car_cmd(v, omega)
-        #     rospy.sleep(1)
-        #     self.first_start = False
+        d_err = self.lane_pose.d - self.d_offset
+        phi_err = self.lane_pose.phi
 
         if (self.cmd_stop and stop_time_diff > self.stop_cooldown):
             self.stop_time = curr_time
@@ -256,10 +281,10 @@ class RobotCircuitNode(DTROS):
             self.car_cmd(v, omega)
             rospy.sleep(self.stop_duration)
         elif self.process_intersection:
-            if self.tag_id == 48:
+            if self.tag_id in [48, 94]:
                 print("Gping right")
                 self.turn_right()
-            elif self.tag_id == 50:
+            elif self.tag_id in [50, 169]:
                 print("Going left")
                 self.turn_left()
             else:
@@ -267,63 +292,66 @@ class RobotCircuitNode(DTROS):
                 self.go_straight()
 
             self.process_intersection = False
-        elif self.duckie_detected and self.tag_id == 123:
+        elif self.duckie_detected and self.tag_id in [21, 163] and self.process_intersection:
             v = 0.0
             omega = 0.0
             print("Duckie detected")
             self.car_cmd(v, omega)
             rospy.sleep(3.0)
 
-        elif self.vehicle_ahead() and not self.english_driver:
-            v = 0.0
-            omega = 0.0
-            print("Vehicle detected")
-            self.car_cmd(v, omega)
-            rospy.sleep(3.0)
+        # elif self.vehicle_ahead() and not self.english_driver:
+        #     v = 0.0
+        #     omega = 0.0
+        #     print("Vehicle detected")
+        #     self.car_cmd(v, omega)
+        #     rospy.sleep(3.0)
 
-            self.english_driver_time = curr_time
-            self.english_driver = True
-            self.set_english_driver(True)
+        #     self.english_driver_time = curr_time
+        #     self.english_driver = True
+        #     self.set_english_driver(True)
             
         elif self.english_driver and english_driver_time_diff > self.english_drive_cooldown:
             self.set_english_driver(False)
             self.english_driver = False
         else:
-            # v = self.velocity_controller(self.tv)
-            self.car_cmd(self.lane_follow_v, self.lane_follow_omega)
+            _, omega = self.lane_pid_controller.compute_control_actions(d_err, phi_err, None)
+            self.car_cmd(0.25, omega)
+
+        self.rate.sleep()
 
     def car_cmd(self, v, omega):
         car_control_msg = Twist2DStamped()
 
         car_control_msg.v = v
-        car_control_msg.omega = omega
-        self.pub_car_cmd.publish(car_control_msg)
+        car_control_msg.omega = omega * 2.0
+        # self.pub_car_cmd.publish(car_control_msg)
     
     def turn_right(self):
         """Make a right turn at an intersection"""
-        self.car_cmd(v=0.4, omega=0)
-        rospy.sleep(1.0)
-        self.car_cmd(v=0.45, omega=-5)
+        self.car_cmd(v=0.25, omega=0)
+        rospy.sleep(2.0)
+        self.car_cmd(v=0.35, omega=-3)
         rospy.sleep(2.0)
         self.stop_hist = []
         self.cmd_stop = False
-        self.reset_lane_controller()
+        self.lane_pid_controller.reset_controller()
 
     def turn_left(self):
         """Make a left turn at an intersection"""
-        self.car_cmd(v=0.5, omega = 2.0)
+        self.car_cmd(v=0.35, omega = 1.5)
         rospy.sleep(3)
         self.stop_hist = []
         self.cmd_stop = False
-        self.reset_lane_controller()
+        self.lane_pid_controller.reset_controller()
+
 
     def go_straight(self):
         """Go straight at an intersection"""
-        self.car_cmd(v = 0.3, omega = 0.0)
-        rospy.sleep(4)
+        self.car_cmd(v = 0.25, omega = 0.0)
+        rospy.sleep(3)
         self.stop_hist = []
         self.cmd_stop = False
-        self.reset_lane_controller()
+        self.lane_pid_controller.reset_controller()
 
     def to_lane_frame(self, point):
         p_homo = np.array([point.x, point.y, 1])
@@ -334,16 +362,12 @@ class RobotCircuitNode(DTROS):
         p_new = p_new_homo[0:2]
         return p_new
 
-    def reset_lane_controller(self):
-        reset_bool = Bool()
-        reset_bool.data = True
-        self.pub_reset_lane_follow.publish(reset_bool)
-
     
     def set_english_driver(self, set_english: bool):
-        english_bool = Bool()
-        english_bool.data = set_english
-        self.pub_english_lane_follow.publish(english_bool)
+        if set_english:
+            self.d_offset = 0.20
+        else:
+            self.d_offset = 0.0
 
     def custom_shutdown(self):
         """Cleanup function."""
@@ -378,7 +402,4 @@ class RobotCircuitNode(DTROS):
 
 if __name__ == '__main__':
     node = RobotCircuitNode(node_name='robot_circuit_node')
-    rate = rospy.Rate(10)
-    while not rospy.is_shutdown():
-        node.get_control_action()
-        rate.sleep()
+    rospy.spin()

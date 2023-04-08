@@ -1,0 +1,2 @@
+rosparam set /csc22945/line_detector_node/colors/BLUE/low [90,87,100]
+rosparam set /csc22945/line_detector_node/colors/BLUE/high [142,255,255]
