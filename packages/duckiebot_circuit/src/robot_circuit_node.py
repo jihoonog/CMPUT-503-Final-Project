@@ -200,11 +200,10 @@ class RobotCircuitNode(DTROS):
                 max_area = area
         
         if max_idx != -1:
-            M = cv2.moments(contours[i])
+            M = cv2.moments(contours[max_idx])
             try:
                 cx = int(M['m10'] / M['m00'])
                 cy = int(M['m01'] / M['m00'])
-                print(cy)
                 if cy > self.duckwalk_stop_distance:
                     self.process_duckwalk = True
                 if DEBUG:
