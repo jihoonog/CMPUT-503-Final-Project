@@ -12,7 +12,7 @@ from turbojpeg import TurboJPEG
 import os
 
 
-DEBUG = True
+DEBUG = False
 
 
 class ObstacleDetectionNode(DTROS):
@@ -28,10 +28,16 @@ class ObstacleDetectionNode(DTROS):
 
         self.bridge = CvBridge()
         self.jpeg = TurboJPEG()
-        self.rate = rospy.Rate(15)
+        self.rate = rospy.Rate(20)
 
         # Set the threshold of how far the blue line has to be from the top of the image to trigger a stop
-        self.duckwalk_threshold = 100
+        self.duckwalk_threshold = 75
+        ## parameters for the blob detector 
+        self.blobdetector_min_area = 10
+        self.blobdetector_min_dist_between_blobs = 2
+
+        self.set_parameters()
+
 
         ## Setup subscribers
         self.sub_image = rospy.Subscriber( f'/{self.veh}/camera_node/image/compressed',CompressedImage,self.processImage, queue_size=1)
@@ -45,28 +51,33 @@ class ObstacleDetectionNode(DTROS):
         self.pub_debug_duckie_image = rospy.Publisher(f"/{self.veh}/obj_detection/duckie_detection/image/compressed", CompressedImage, queue_size=1)
         self.pub_debug_duckiebot_image = rospy.Publisher(f"/{self.veh}/obj_detection/duckiebot_detection/image/compressed", CompressedImage, queue_size=1)
     
+    def set_parameters(self):
+        params = cv2.SimpleBlobDetector_Params()
+        params.minArea = self.blobdetector_min_area
+        params.minDistBetweenBlobs = self.blobdetector_min_dist_between_blobs
+        self.simple_blob_detector = cv2.SimpleBlobDetector_create(params)
+
+
     def detect_duckiebot_tag(self, image):
-        # Hough circle takes in a grayscale image
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        gray = cv2.medianBlur(gray, 5)
+        duckiebot_detected = False
 
-        circles = cv2.HoughCircles(gray, cv2.HOUGH_GRADIENT, 1, minDist=20, param1=100, param2=100, minRadius=0, maxRadius=0)
+        # Grid circle detector
+        (detection, centers) = cv2.findCirclesGrid(
+            image,
+            patternSize=tuple([7,3]),
+            flags=cv2.CALIB_CB_SYMMETRIC_GRID,
+            blobDetector=self.simple_blob_detector,
+        )
 
-        if circles is not None and len(circles) < 3:
-            return False
-        
-        if DEBUG:
-            circles = np.uint16(np.around(circles))
-            for i in circles[0,:]:
-                center = (i[0], i[1])
-                cv2.circle(image, center, 1, (0, 100, 100), 3)
-                radius = i[2]
-                cv2.circle(image, center, radius, (255, 0, 255), 3)
+        if detection > 0:
+            duckiebot_detected = True
 
-            image_msg = CompressedImage(format='jpeg', data=self.jpeg.encode(image)) 
-            self.pub_debug_duckiebot_image.publish(image_msg)
+            if True:
+                cv2.drawChessboardCorners(image, tuple([7,3]), centers, detection)
+                image_msg = CompressedImage(format='jpeg', data=self.jpeg.encode(image)) 
+                self.pub_debug_duckiebot_image.publish(image_msg)
 
-        return True            
+        return duckiebot_detected            
 
     def detect_duckwalk(self, image):
         duckwalk_detected = False
@@ -95,7 +106,7 @@ class ObstacleDetectionNode(DTROS):
                     duckwalk_detected = True
                 
                 if DEBUG:
-                    print(cy)
+                    # print(cy)
                     cv2.drawContours(duckiewalk_crop, line_contour, line_max_idx, (0, 255, 0), 3)
                     cv2.circle(duckiewalk_crop, (cx, cy), 7, (0, 0, 255), -1)
             except:
@@ -111,7 +122,7 @@ class ObstacleDetectionNode(DTROS):
         duckie_detected = False
 
         # Crop for both the duckiewalk and duckie
-        duckie_crop = image[200:-1, 213:427, :]
+        duckie_crop = image[150:-1, 200:450, :]
         # Conver them to HSV
         duckie_hsv = cv2.cvtColor(duckie_crop, cv2.COLOR_BGR2HSV)
         # There are specific for both the duckiewalk and duckie
@@ -148,15 +159,15 @@ class ObstacleDetectionNode(DTROS):
             return
         
         duckie_detected = self.detect_duckie(image_cv)
-        print("Duckie detected" if duckie_detected else "No duckie")
+        # print("Duckie detected" if duckie_detected else "No duckie")
         self.pub_duckie_detected.publish(duckie_detected)
 
         duckwalk_detected = self.detect_duckwalk(image_cv)
-        print("Duckwalk detected" if duckwalk_detected else "No duckwalk")
+        # print("Duckwalk detected" if duckwalk_detected else "No duckwalk")
         self.pub_duckwalk_detected.publish(duckwalk_detected)
 
         duckiebot_detected = self.detect_duckiebot_tag(image_cv)
-        print("Duckiebot detected" if duckiebot_detected else "No duckiebot")
+        # print("Duckiebot detected" if duckiebot_detected else "No duckiebot")
         self.pub_duckiebot_detected.publish(duckiebot_detected)
 
         self.rate.sleep()

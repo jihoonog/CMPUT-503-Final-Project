@@ -61,14 +61,14 @@ class RobotCircuitNode(DTROS):
 
 
         # Static parameters
-        self.update_freq = 15
+        self.update_freq = 20
         self.rate = rospy.Rate(self.update_freq)
         self.d_offset = 0.0
         self.lane_controller_parameters = {
-            "Kp_d": 7.0,
-            "Ki_d": 0.75,
-            "Kd_d": 0.125,
-            "Kp_theta": 5.0,
+            "Kp_d": 10.0,
+            "Ki_d": 1.0,
+            "Kd_d": 0.225,
+            "Kp_theta": 6.0,
             "Ki_theta": 0.25,
             "Kd_theta": 0.025,
             "sample_time": 0.01,
@@ -81,11 +81,12 @@ class RobotCircuitNode(DTROS):
         self.min_segs = 20  # minimum number of red segments that we should detect to estimate a stop
         self.off_time = 2.0 # time to wait after we have passed the stop line
         self.max_y = 0.10   # If y value of detected red line is smaller than max_y we will not set at_stop_line true.
-        self.stop_hist_len = 10
+        self.stop_hist_len = 7
         self.stop_duration = 1
         self.stop_cooldown = 6 # The stop cooldown
+        self.duckwalk_cooldown = 6
         ## For duckiebot detection and avoidance
-        self.safe_distance = 0.45
+        self.safe_distance = 0.7
         self.english_drive_cooldown = 5
 
         # Initialize variables
@@ -104,6 +105,7 @@ class RobotCircuitNode(DTROS):
         ## For duckie detection
         self.duckie_detected = False
         self.process_duckwalk = False
+        self.duckwalk_time = 0.0
         ## For vehicle distance, detection, and avoidance
         self.vehicle_distance = 99.99
         self.vehicle_detected = False
@@ -129,6 +131,7 @@ class RobotCircuitNode(DTROS):
         self.sub_duckie_detected = rospy.Subscriber(f'/{self.veh_name}/all_detection/duckie_detected', Bool, self.cb_duckie_detected, queue_size = 1)
         self.sub_duckiewalk_detected = rospy.Subscriber(f'/{self.veh_name}/all_detection/duckwalk_detected', Bool, self.cb_duckwalk_detected, queue_size = 1)
         self.sub_duckiebot_detected = rospy.Subscriber(f'/{self.veh_name}/all_detection/duckiebot_detected', Bool, self.cb_duckiebot_detected, queue_size = 1)
+
         self.sub_range_finder = rospy.Subscriber(f'/{self.veh_name}/front_center_tof_driver_node/range', Range, self.cb_range_finder, queue_size = 1)
         
         self.april_tag = -1
@@ -184,7 +187,7 @@ class RobotCircuitNode(DTROS):
         self.process_duckwalk = bool_msg.data
 
     def cb_duckiebot_detected(self, duckiebot_detected_msg):
-        self.duckiebot_detected = duckiebot_detected_msg.data
+        self.vehicle_detected = duckiebot_detected_msg.data
 
     def cb_range_finder(self, range_msg):
         self.vehicle_distance = range_msg.range
@@ -200,6 +203,8 @@ class RobotCircuitNode(DTROS):
     ## end of callback functions
 
     def vehicle_ahead(self):
+        # print(f"Vehicle detected: {self.vehicle_detected}, distance: {self.vehicle_distance}")
+
         if self.vehicle_detected and self.vehicle_distance < self.safe_distance:
             return True
         else:
@@ -231,6 +236,7 @@ class RobotCircuitNode(DTROS):
         curr_time = rospy.get_time()
 
         stop_time_diff = curr_time - self.stop_time
+        duckwalk_time_diff = curr_time - self.duckwalk_time
         english_driver_time_diff = curr_time - self.english_driver_time
         d_err = self.lane_pose.d - self.d_offset
         phi_err = self.lane_pose.phi
@@ -256,36 +262,51 @@ class RobotCircuitNode(DTROS):
                 self.go_straight()
 
             self.process_intersection = False
-        elif self.process_duckwalk and self.tag_id in [21, 163]:
+        elif self.process_duckwalk and self.tag_id in [21, 163] and duckwalk_time_diff > self.duckwalk_cooldown:
             v = 0.0
             omega = 0.0
             self.car_cmd(v, omega)
-            rospy.sleep(3.0)
             print("Doing duckwalk")
-            if self.duckie_detected:
-                print("duckie detected")
-                rospy.sleep(2.0)
-                self.car_cmd(v=0.0, omega=0.0)
-            else:
-                self.car_cmd(v=0.25, omega=0.0)
-                rospy.sleep(2)
-                self.process_duckwalk = False
-                self.lane_pid_controller.reset_controller()
-
-        # elif self.vehicle_ahead() and not self.english_driver:
-        #     v = 0.0
-        #     omega = 0.0
-        #     print("Vehicle detected")
-        #     self.car_cmd(v, omega)
-        #     rospy.sleep(3.0)
-
-        #     self.english_driver_time = curr_time
-        #     self.english_driver = True
-        #     self.set_english_driver(True)
+            rospy.sleep(1.0)
+            self.do_duckwalk()
             
-        elif self.english_driver and english_driver_time_diff > self.english_drive_cooldown:
-            self.set_english_driver(False)
-            self.english_driver = False
+        elif self.vehicle_ahead() and not self.english_driver:
+            v = 0.0
+            omega = 0.0
+            print("Vehicle detected")
+            self.car_cmd(v, omega)
+            rospy.sleep(3.0)
+            print("Changing lanes")
+            self.car_cmd(v=0.25, omega=2.0)
+            rospy.sleep(1.0)
+            self.car_cmd(v=0.25, omega=0.0)
+            rospy.sleep(2.0)
+            self.car_cmd(v=0.25, omega=-2.0)
+            rospy.sleep(2.5)
+            self.car_cmd(v=0.25, omega=0.0)
+            rospy.sleep(1)
+            self.car_cmd(v=0.25, omega=2.0)
+            rospy.sleep(1)
+            # self.english_driver_time = curr_time
+            
+            # print("Doing english driver")
+            # self.english_driver = True
+            # self.set_english_driver(True)
+            self.lane_pid_controller.reset_controller()
+            
+        # elif self.english_driver and english_driver_time_diff > self.english_drive_cooldown:
+        #     print("Finishing english driver")
+        #     print("Changing lanes")
+        #     self.car_cmd(v=0.25, omega=-2.0)
+        #     rospy.sleep(1.0)
+        #     self.car_cmd(v=0.25, omega=0.0)
+        #     rospy.sleep(2)
+        #     self.car_cmd(v=0.25, omega=1.5)
+        #     rospy.sleep(1)
+        #     self.set_english_driver(False)
+        #     self.english_driver = False
+        #     self.lane_pid_controller.reset_controller()
+        #     print("Doing regular driver")
         else:
             _, omega = self.lane_pid_controller.compute_control_actions(d_err, phi_err, None)
             self.car_cmd(0.25, omega)
@@ -326,16 +347,18 @@ class RobotCircuitNode(DTROS):
         self.lane_pid_controller.reset_controller()
 
     def do_duckwalk(self):
-        print("Doing duckwalk")
+        """Processing duckwalk"""
         while self.duckie_detected:
             print("duckie detected")
             rospy.sleep(2.0)
             self.car_cmd(v=0.0, omega=0.0)
         
         self.car_cmd(v=0.25, omega=0.0)
-        rospy.sleep(2)
+        rospy.sleep(3)
         self.process_duckwalk = False
         self.lane_pid_controller.reset_controller()
+        self.duckwalk_time = rospy.get_time()
+        print("Done duckwalk")
 
     def to_lane_frame(self, point):
         p_homo = np.array([point.x, point.y, 1])
