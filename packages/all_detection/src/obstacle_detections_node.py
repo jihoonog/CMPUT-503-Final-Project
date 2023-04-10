@@ -1,21 +1,11 @@
 #!/usr/bin/env python3
 import rospy
 import numpy as np
-from duckietown_msgs.msg import Twist2DStamped, LanePose, SegmentList, Segment
-from geometry_msgs.msg import Point
-from duckietown.dtros import DTROS, NodeType, TopicType, DTParam, ParamType
-from std_msgs.msg import String,Int32
+from duckietown.dtros import DTROS, NodeType
+from std_msgs.msg import Bool
 from sensor_msgs.msg import CompressedImage, Image
-from duckietown_utils.jpg import bgr_from_jpg
 import cv2
-import cv2 as cv
-import time
-import rospkg 
-from cv_bridge import CvBridge, CvBridgeError
-import yaml
-import duckietown_utils as dtu
-from duckietown_utils import (logger)
-from duckietown_utils.yaml_wrap import (yaml_write_to_file)
+from cv_bridge import CvBridge
 
 from turbojpeg import TurboJPEG 
 
@@ -35,83 +25,144 @@ class ObstacleDetectionNode(DTROS):
             self.veh = os.environ["VEHICLE_NAME"]
         else:
             self.veh = "csc22935"
-        self.pub_image = rospy.Publisher(f"/{self.veh}/obj_detection/image/compressed", CompressedImage, queue_size=1)
 
         self.bridge = CvBridge()
         self.jpeg = TurboJPEG()
         self.rate = rospy.Rate(15)
 
-        self.pub_duckie_detected = rospy.Publisher(f'/{self.veh}/duckie_detected', Int32, queue_size=1)
+        # Set the threshold of how far the blue line has to be from the top of the image to trigger a stop
+        self.duckwalk_threshold = 100
+
+        ## Setup subscribers
         self.sub_image = rospy.Subscriber( f'/{self.veh}/camera_node/image/compressed',CompressedImage,self.processImage, queue_size=1)
-        #rospy.Subscriber("~corrected_image/compressed", CompressedImage, self.processImage, queue_size=1)
-        self.upper_bound = -1
 
+        ## Setup publishers 
+        self.pub_duckie_detected = rospy.Publisher(f'/{self.veh}/all_detection/duckie_detected', Bool, queue_size=1)
+        self.pub_duckwalk_detected = rospy.Publisher(f'/{self.veh}/all_detection/duckwalk_detected', Bool, queue_size=1)
+        self.pub_duckiebot_detected = rospy.Publisher(f'/{self.veh}/all_detection/duckiebot_detected', Bool, queue_size=1)
+        
+        self.pub_debug_duckwalk_image = rospy.Publisher(f"/{self.veh}/obj_detection/duckwalk_detection/image/compressed", CompressedImage, queue_size=1)
+        self.pub_debug_duckie_image = rospy.Publisher(f"/{self.veh}/obj_detection/duckie_detection/image/compressed", CompressedImage, queue_size=1)
+        self.pub_debug_duckiebot_image = rospy.Publisher(f"/{self.veh}/obj_detection/duckiebot_detection/image/compressed", CompressedImage, queue_size=1)
+    
+    def detect_duckiebot_tag(self, image):
+        # Hough circle takes in a grayscale image
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        gray = cv2.medianBlur(gray, 5)
 
-    def processImage(self, image_msg):
-        image_size = [480,640]
-        # top_cutoff = 40
+        circles = cv2.HoughCircles(gray, cv2.HOUGH_GRADIENT, 1, minDist=20, param1=100, param2=100, minRadius=0, maxRadius=0)
 
-        start_time = time.time()
-        try:
-            image_cv = self.jpeg.decode(image_msg.data)
-        except ValueError as e:
-            print("image decode error", e)
-            return
-        # Crop for both the duckiewalk and duckie
-        duckiewalk_crop = image_cv[200:-1, 213:427, :]
-        duckie_crop = image_cv[200:-1, 213:427, :]
+        if circles is not None and len(circles) < 3:
+            return False
+        
+        if DEBUG:
+            circles = np.uint16(np.around(circles))
+            for i in circles[0,:]:
+                center = (i[0], i[1])
+                cv2.circle(image, center, 1, (0, 100, 100), 3)
+                radius = i[2]
+                cv2.circle(image, center, radius, (255, 0, 255), 3)
+
+            image_msg = CompressedImage(format='jpeg', data=self.jpeg.encode(image)) 
+            self.pub_debug_duckiebot_image.publish(image_msg)
+
+        return True            
+
+    def detect_duckwalk(self, image):
+        duckwalk_detected = False
+
+        duckiewalk_crop = image[200:-1, 213:427, :]
         duckiewalk_hsv = cv2.cvtColor(duckiewalk_crop, cv2.COLOR_BGR2HSV)
-        duckie_hsv = cv2.cvtColor(duckiewalk_crop, cv2.COLOR_BGR2HSV)
-        # There are specific for both the duckiewalk and duckie
         duckiewalk_mask = cv2.inRange(duckiewalk_hsv, (90,87,100), (142,255,255))
-        duckie_mask = cv2.inRange(duckie_hsv, (10,55,100), (45,255,255))
         duckiewalk_crop = cv2.bitwise_and(duckiewalk_crop, duckiewalk_crop, mask=duckiewalk_mask)
-        duckie_crop = cv2.bitwise_and(duckie_crop, duckie_crop, mask=duckie_mask)
         line_contour, _ = cv2.findContours(duckiewalk_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        duckie_contour, _ = cv2.findContours(duckie_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        duckie_max_area = 1500
-        line_max_area = 50
-
-        line_idx = -1
-        duckie_idx = -1
+        
+        line_max_area = 100
+        line_max_idx = -1
         for i in range(len(line_contour)):
             area = cv2.contourArea(line_contour[i])
             if area > line_max_area:
                 line_max_area = area
-                line_idx = i
+                line_max_idx = i
+
+        if line_max_idx != -1:
+            M = cv2.moments(line_contour[line_max_idx])
+            try:
+                cx = int(M['m10'] / M['m00'])
+                cy = int(M['m01'] / M['m00'])
+
+                if cy > self.duckwalk_threshold:
+                    duckwalk_detected = True
+                
+                if DEBUG:
+                    print(cy)
+                    cv2.drawContours(duckiewalk_crop, line_contour, line_max_idx, (0, 255, 0), 3)
+                    cv2.circle(duckiewalk_crop, (cx, cy), 7, (0, 0, 255), -1)
+            except:
+                pass
+
+        if DEBUG:
+            rect_img_msg = CompressedImage(format='jpeg', data=self.jpeg.encode(duckiewalk_crop)) 
+            self.pub_debug_duckwalk_image.publish(rect_img_msg)         
+
+        return duckwalk_detected
+    
+    def detect_duckie(self, image):
+        duckie_detected = False
+
+        # Crop for both the duckiewalk and duckie
+        duckie_crop = image[200:-1, 213:427, :]
+        # Conver them to HSV
+        duckie_hsv = cv2.cvtColor(duckie_crop, cv2.COLOR_BGR2HSV)
+        # There are specific for both the duckiewalk and duckie
+        duckie_mask = cv2.inRange(duckie_hsv, (10,55,100), (45,255,255))
+        # Apply the mask
+        duckie_crop = cv2.bitwise_and(duckie_crop, duckie_crop, mask=duckie_mask)
+        # Get the contours
+        duckie_contour, _ = cv2.findContours(duckie_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        duckie_max_area = 1500
+        duckie_max_idx = -1
 
         for i in range(len(duckie_contour)):
             area = cv2.contourArea(duckie_contour[i])
             if area > duckie_max_area:
                 duckie_max_area = area
-                duckie_idx = i
+                duckie_max_idx = i
 
-        if line_idx != -1:
-            M = cv2.moments(line_contour[line_idx])
-            try:
-                cx = int(M['m10'] / M['m00'])
-                cy = int(M['m01'] / M['m00'])
-                print(cy)
-                if DEBUG:
-                    cv2.drawContours(duckiewalk_crop, line_contour, max_idx, (0, 255, 0), 3)
-                    cv2.circle(duckiewalk_crop, (cx, cy), 7, (0, 0, 255), -1)
-            except:
-                pass
+        if duckie_max_idx != -1:
+            duckie_detected = True
+            if DEBUG:
+                cv2.drawContours(duckie_crop, duckie_contour, duckie_max_idx, (0, 255, 0), 3)
+                rect_img_msg = CompressedImage(format='jpeg', data=self.jpeg.encode(duckie_crop))
+                self.pub_debug_duckie_image.publish(rect_img_msg)
 
-        if duckie_idx != -1:
-            print("Duckie exist")
+        return duckie_detected
+    
+    def processImage(self, image_msg):
 
-        if DEBUG:
-            rect_img_msg = CompressedImage(format='jpeg', data=self.jpeg.encode(duckiewalk_crop)) 
-            self.pub_image.publish(rect_img_msg)           
+        try:
+            image_cv = self.jpeg.decode(image_msg.data)
+        except ValueError as e:
+            print("image decode error", e)
+            return
+        
+        duckie_detected = self.detect_duckie(image_cv)
+        print("Duckie detected" if duckie_detected else "No duckie")
+        self.pub_duckie_detected.publish(duckie_detected)
+
+        duckwalk_detected = self.detect_duckwalk(image_cv)
+        print("Duckwalk detected" if duckwalk_detected else "No duckwalk")
+        self.pub_duckwalk_detected.publish(duckwalk_detected)
+
+        duckiebot_detected = self.detect_duckiebot_tag(image_cv)
+        print("Duckiebot detected" if duckiebot_detected else "No duckiebot")
+        self.pub_duckiebot_detected.publish(duckiebot_detected)
 
         self.rate.sleep()
 
 if __name__ == "__main__":
-    #defining node, publisher, subscriber
-    #rospy.init_node("purepursuit_controller_node", anonymous=True)
     obs_detection_node = ObstacleDetectionNode(node_name="obstacle_detections_node")
-
     rospy.spin()
 
     

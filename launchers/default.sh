@@ -14,7 +14,6 @@ dt-launchfile-init
 
 # launching app
 dt-exec roslaunch all_detection all_detection.launch 
-dt-exec roslaunch purepursuit purepursuit_controller.launch 
 sleep 2
 dt-exec roslaunch duckiebot_circuit duckiebot_circuit_node.launch
 

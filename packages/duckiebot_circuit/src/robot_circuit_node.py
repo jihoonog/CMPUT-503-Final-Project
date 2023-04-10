@@ -63,14 +63,6 @@ class RobotCircuitNode(DTROS):
         # Static parameters
         self.update_freq = 15
         self.rate = rospy.Rate(self.update_freq)
-        self.velocity_controller = PID(
-            Kp=0.5,
-            Ki=0.0,
-            Kd=0.1,
-            setpoint=0.25,
-            sample_time= 0.01,
-            output_limits=(0.0, 0.5)
-        )
         self.d_offset = 0.0
         self.lane_controller_parameters = {
             "Kp_d": 7.0,
@@ -95,15 +87,10 @@ class RobotCircuitNode(DTROS):
         ## For duckiebot detection and avoidance
         self.safe_distance = 0.45
         self.english_drive_cooldown = 5
-        ## For duckwalk stopage
-        self.duckwalk_stop_distance = 75
-
 
         # Initialize variables
         self.lane_pose = LanePose()
         self.lane_pid_controller = LaneController(self.lane_controller_parameters)
-        self.first_start = True
-        self.jpeg = TurboJPEG()
         ## For stop line detection
         self.stop_line_distance = None
         self.stop_line_detected = False
@@ -116,7 +103,6 @@ class RobotCircuitNode(DTROS):
         self.action_done = False
         ## For duckie detection
         self.duckie_detected = False
-        self.duckwalk_cy = 0.0
         self.process_duckwalk = False
         ## For vehicle distance, detection, and avoidance
         self.vehicle_distance = 99.99
@@ -137,10 +123,14 @@ class RobotCircuitNode(DTROS):
         self.sub_lane_reading = rospy.Subscriber(f"/{self.veh_name}/lane_filter_node/lane_pose", LanePose, self.cb_lane_pose, queue_size = 1)
         self.sub_segment_list = rospy.Subscriber(f"/{self.veh_name}/line_detector_node/segment_list", SegmentList, self.cb_segments, queue_size=1)
         self.sub_tag_id = rospy.Subscriber(f"/{self.veh_name}/tag_id", Int32, self.cb_tag_id, queue_size=1)
+
         self.sub_shutdown_commands = rospy.Subscriber(f'/{self.veh_name}/number_detection_node/shutdown_cmd', String, self.shutdown, queue_size = 1)
-        self.sub_duckie_detected = rospy.Subscriber(f'/{self.veh_name}/duckie_detected', Int32, self.cb_duckie_detected, queue_size = 1)
+        
+        self.sub_duckie_detected = rospy.Subscriber(f'/{self.veh_name}/all_detection/duckie_detected', Bool, self.cb_duckie_detected, queue_size = 1)
+        self.sub_duckiewalk_detected = rospy.Subscriber(f'/{self.veh_name}/all_detection/duckwalk_detected', Bool, self.cb_duckwalk_detected, queue_size = 1)
+        self.sub_duckiebot_detected = rospy.Subscriber(f'/{self.veh_name}/all_detection/duckiebot_detected', Bool, self.cb_duckiebot_detected, queue_size = 1)
         self.sub_range_finder = rospy.Subscriber(f'/{self.veh_name}/front_center_tof_driver_node/range', Range, self.cb_range_finder, queue_size = 1)
-        self.sub_camera = rospy.Subscriber(f'/{self.veh_name}/camera_node/image/compressed', CompressedImage, self.cb_duckiewalk_detector, queue_size=1, buff_size="20MB")
+        
         self.april_tag = -1
 
         rospy.on_shutdown(self.custom_shutdown)
@@ -183,41 +173,6 @@ class RobotCircuitNode(DTROS):
         
         self.process_stop_line(at_stop_line)
 
-    def cb_duckiewalk_detector(self, image_msg):
-        img = self.jpeg.decode(image_msg.data)
-        crop = img[200:-1, :, :]
-        hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
-        mask = cv2.inRange(hsv, (90,87,100), (142,255,255))
-        crop = cv2.bitwise_and(crop, crop, mask=mask)
-        contours, hierarchy = cv2.findContours(mask,cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-        max_area = 20
-        max_idx = -1
-        for i in range(len(contours)):
-            area = cv2.contourArea(contours[i])
-            if area > max_area:
-                max_idx = i
-                max_area = area
-        
-        if max_idx != -1:
-            M = cv2.moments(contours[max_idx])
-            try:
-                cx = int(M['m10'] / M['m00'])
-                cy = int(M['m01'] / M['m00'])
-                if cy > self.duckwalk_stop_distance:
-                    self.process_duckwalk = True
-                if DEBUG:
-                    cv2.drawContours(crop, contours, max_idx, (0, 255, 0), 3)
-                    cv2.circle(crop, (cx, cy), 7, (0, 0, 255), -1)
-            except:
-                pass
-        if DEBUG:
-            rect_img_msg = CompressedImage(format='jpeg', data=self.jpeg.encode(crop))
-            self.pub_duckiewalk.publish(rect_img_msg)
-
-        self.rate.sleep()
-
-
     def cb_lane_pose(self, input_pose_msg):
         self.lane_pose = input_pose_msg
         self.get_control_action()
@@ -225,12 +180,17 @@ class RobotCircuitNode(DTROS):
     def cb_duckie_detected(self, duckie_detected_msg):
         self.duckie_detected = duckie_detected_msg.data
 
+    def cb_duckwalk_detected(self, bool_msg):
+        self.process_duckwalk = bool_msg.data
+
+    def cb_duckiebot_detected(self, duckiebot_detected_msg):
+        self.duckiebot_detected = duckiebot_detected_msg.data
+
     def cb_range_finder(self, range_msg):
         self.vehicle_distance = range_msg.range
 
     def cb_tag_id(self, tag_msg):
-
-        # New action coming.
+        # Only set tags that are different and have been found
         if tag_msg.data != -1 and tag_msg.data != self.tag_id:
             print("tag_msg",tag_msg)
             self.tag_id = tag_msg.data
@@ -240,7 +200,7 @@ class RobotCircuitNode(DTROS):
     ## end of callback functions
 
     def vehicle_ahead(self):
-        if self.tag_id == 163 and self.vehicle_distance < self.safe_distance:
+        if self.vehicle_detected and self.vehicle_distance < self.safe_distance:
             return True
         else:
             return False
