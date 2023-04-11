@@ -24,7 +24,7 @@ class ObstacleDetectionNode(DTROS):
         if os.environ["VEHICLE_NAME"] is not None:
             self.veh = os.environ["VEHICLE_NAME"]
         else:
-            self.veh = "csc22935"
+            self.veh = "csc22945"
 
         self.bridge = CvBridge()
         self.jpeg = TurboJPEG()

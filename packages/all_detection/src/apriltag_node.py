@@ -39,7 +39,7 @@ class AprilTagNode(DTROS):
         if os.environ["VEHICLE_NAME"] is not None:
             self.veh = os.environ["VEHICLE_NAME"]
         else:
-            self.veh = "csc22935"
+            self.veh = "csc22945"
         self.rospack = rospkg.RosPack()
         self.read_params_from_calibration_file()
         # Get parameters from config
@@ -85,7 +85,7 @@ class AprilTagNode(DTROS):
         self.buffer_listener = tf2_ros.TransformListener(self.buffer)
         self.sub_shutdown_commands = rospy.Subscriber(f'/{self.veh}/all_detection_node/shutdown_cmd', String, self.shutdown, queue_size = 1)
         
-
+        self.get_pose = False
 
         self.fusion_x = 0
         self.fusion_y = 0
@@ -93,15 +93,6 @@ class AprilTagNode(DTROS):
         self.br = CvBridge()
 
         self.fusion_rotation_z = 0
-        self.tag_map = {
-            48:"Right", 94:"Right", 
-            50:"Left", 169: "Left", 
-            56:"Straight", 200: "Straight",
-            163:"Duckwalk", 21: "Duckwalk",
-            227:"parking entrance",
-            207:"parking 1", 226: "parking 2", 
-            228:"parking 3",75:"parking 4",
-        }
 
 
 
@@ -128,45 +119,19 @@ class AprilTagNode(DTROS):
         static_transformStamped.transform.rotation.y = quat[1]
         static_transformStamped.transform.rotation.z = quat[2]
         static_transformStamped.transform.rotation.w = quat[3]
-        #print(static_transformStamped)
 
         self.broadcaster.sendTransform(static_transformStamped)
 
-    def combine_trans(self, april_frame, trans):
 
-        trans_x = trans.transform.translation.x
-        trans_y = trans.transform.translation.y
-        trans_z = trans.transform.translation.z
-        quat = trans.transform.rotation
-        #print(quat)
-        static_transformStamped = geometry_msgs.msg.TransformStamped()
-
-        static_transformStamped.header.stamp = rospy.Time.now()
-        static_transformStamped.header.frame_id = april_frame
-        static_transformStamped.child_frame_id = f"{self.veh}/calibrated_location"
-
-        static_transformStamped.transform.translation.x = trans_x
-        static_transformStamped.transform.translation.y = trans_y
-        static_transformStamped.transform.translation.z = trans_z
-
-        
-        static_transformStamped.transform.rotation.x = quat.x
-        static_transformStamped.transform.rotation.y = quat.y
-        static_transformStamped.transform.rotation.z = quat.z
-        static_transformStamped.transform.rotation.w = quat.w
-        #print(static_transformStamped)
-
-        self.tmp_broadcaster.sendTransform(static_transformStamped)
 
     def shutdown(self, msg):
-
         if msg.data=="shutdown":
             rospy.signal_shutdown("Apriltag detection Node Shutdown command received")
             exit()
 
 
     def project(self, msg):
-
+        parking_id = 227
         
         
         # Convert image to cv2 image.
@@ -174,9 +139,11 @@ class AprilTagNode(DTROS):
         # Convert to grey image and distort it.
         dis = self.augmenter.process_image(self.raw_image)
         new_img = dis
-        if self.frequency_control % 5 == 0:
 
-            tags = self.at_detector.detect(dis, estimate_tag_pose=False, camera_params=self.camera_params, tag_size=0.065) # returns list of detection objects
+        
+        if self.frequency_control % 3 == 0:
+
+            tags = self.at_detector.detect(dis, estimate_tag_pose=self.get_pose, camera_params=self.camera_params, tag_size=0.065) # returns list of detection objects
 
             detection_threshold = 10 # The target margin need to be larger than this to get labelled.
             
@@ -195,45 +162,22 @@ class AprilTagNode(DTROS):
                     if tag.decision_margin > max_margin:
                         max_margin = tag.decision_margin
                         max_tag_id = tag.tag_id
-                    
-                    #print(tag)
-                    # z = tag.pose_t[2][0]
-                    # #print(tag.tag_id, tag.decision_margin)
-                    # if tag.decision_margin < detection_threshold or z > z_threshold:
-                    #     continue
-                    #print(tag.pose_t)
-                    # Change led light according to the tag type.
-                    
-                    
-                    #distance_list.append(tag.pose_t[2][0])
-                    #tag_list.append(max_tag_id)
-                    #margin_list.append(tag.decision_margin)
-                    
 
-                
-
-                # print(self.tag_map[int(max_tag_id)])
                 self.pub_tag_id.publish(max_tag_id)
-                
-                # if len(distance_list) != 0:
-                #     # If tag detected:
-                #     closest_tag_idx = argmin(distance_list)
-                #     #print("argmin",closest_tag_idx)
-                #     tag = tag_list[closest_tag_idx]
 
-                #     # Draw bounding box/
-                #     #self.transform_camera_view(tag.pose_t,tag.pose_R)
-                #     # Now here you can get the ground truth location and yaw, use it to modify your odometry.
-                #     tag_name = tag.tag_id
-                #     #self.pub_tag_id.publish(tag_name)
-                    
+                if self.get_pose :
+                    #print(tag.pose_t,tag.pose_R)
+                    self.transform_camera_view(tag.pose_t,tag.pose_R)
+                    trans = self.buffer.lookup_transform(f"{self.veh}/camera_optical_frame",f"{self.veh}/new_location",time=rospy.Time.now(),timeout=rospy.Duration(1.0))
+                    #print(trans)
+
+                if max_tag_id == parking_id:
+                    self.get_pose  = True
 
                     
 
         self.frequency_control +=1
-        # make new CompressedImage to publish
-        #render = self.augmenter.render_segments(points=self._points, img=dis, segments=self._segments)
-        #result = br.cv2_to_compressed_imgmsg(render,dst_format='jpg')
+
         self.r.sleep()
 
     def read_params_from_calibration_file(self):
