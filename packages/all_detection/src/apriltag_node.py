@@ -12,7 +12,7 @@ from cv_bridge import CvBridge
 from duckietown_utils import load_homography, load_map,get_duckiefleet_root
 import rospkg 
 from dt_apriltags import Detector, Detection
-from duckietown_msgs.msg import Twist2DStamped, WheelEncoderStamped, WheelsCmdStamped,LEDPattern
+from duckietown_msgs.msg import Twist2DStamped, WheelEncoderStamped, WheelsCmdStamped, LEDPattern, AprilTagDetection, AprilTagDetectionArray
 from duckietown_msgs.srv import SetCustomLEDPattern, ChangePattern
 # Code from https://github.com/Coral79/exA-3/blob/44adf94bad728507608086b91fbf5645fc22555f/packages/augmented_reality_basics/include/augmented_reality_basics/augmented_reality_basics.py
 # https://docs.photonvision.org/en/latest/docs/getting-started/pipeline-tuning/apriltag-tuning.html
@@ -54,6 +54,7 @@ class AprilTagNode(DTROS):
         # Publisher
         # Keep this state so you don't need to reset the same color over and over again.
         self.pub_tag_id = rospy.Publisher(f'/{self.veh}/tag_id', Int32, queue_size=1)
+        self.pub_all_tag_poses = rospy.Publisher(f'/{self.veh}/all_tag_poses', AprilTagDetectionArray, queue_size=1)
         self.current_led_pattern = 4
 
         self.frequency_control = 0
@@ -70,7 +71,7 @@ class AprilTagNode(DTROS):
         # initialise the apriltag detector
         self.at_detector = Detector(searchpath=['apriltags'],
                            families='tag36h11',
-                           nthreads=1,
+                           nthreads=2,
                            quad_decimate=2,
                            quad_sigma=0.0,
                            refine_edges=1,
@@ -181,7 +182,29 @@ class AprilTagNode(DTROS):
                 # if max_tag_id == parking_id:
                 #     self.get_pose  = True
 
-                    
+                # if self.get_pose:
+                #     tags_msg = AprilTagDetectionArray()
+                #     tags_msg.header.stamp = msg.header.stamp
+                #     tags_msg.header.frame_id = msg.header.frame_id
+
+                #     for tag in tags:
+                #         #print(tag.pose_t,tag.pose_R)
+                #         self.transform_camera_view(tag.pose_t,tag.pose_R)
+                #         trans = self.buffer.lookup_transform(f"{self.veh}/camera_optical_frame",f"{self.veh}/new_location",time=rospy.Time.now(),timeout=rospy.Duration(1.0))
+                #         # print(trans)
+                #         detection = AprilTagDetection(
+                #             transform=trans.transform,
+                #             tag_id=tag.tag_id,
+                #             hamming=tag.hamming,
+                #             decision_margin=tag.decision_margin,
+                #             homography=tag.homography.flatten().astype(np.float32).tolist(),
+                #             center=tag.center.tolist(),
+                #             corners=tag.corners.flatten().tolist(),
+                #             pose_error=tag.pose_err,
+                #         )
+                #         tags_msg.detections.append(detection)
+
+                #     self.pub_all_tag_poses.publish(tags_msg)
 
         self.frequency_control +=1
 
