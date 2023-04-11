@@ -97,6 +97,8 @@ class AprilTagNode(DTROS):
 
 
     def transform_camera_view(self,pose_t,pose_R):
+        # print("pose_t",pose_t)
+        # print("pose_R",pose_R)
         static_transformStamped = geometry_msgs.msg.TransformStamped()
 
         static_transformStamped.header.stamp = rospy.Time.now()
@@ -119,7 +121,7 @@ class AprilTagNode(DTROS):
         static_transformStamped.transform.rotation.y = quat[1]
         static_transformStamped.transform.rotation.z = quat[2]
         static_transformStamped.transform.rotation.w = quat[3]
-
+        #print("static_transformStamped",static_transformStamped)
         self.broadcaster.sendTransform(static_transformStamped)
 
 
@@ -130,10 +132,7 @@ class AprilTagNode(DTROS):
             exit()
 
 
-    def project(self, msg):
-        parking_id = 227
-        
-        
+    def project(self, msg):        
         # Convert image to cv2 image.
         self.raw_image = self.br.compressed_imgmsg_to_cv2(msg)
         # Convert to grey image and distort it.
@@ -141,9 +140,9 @@ class AprilTagNode(DTROS):
         new_img = dis
 
         
-        if self.frequency_control % 3 == 0:
+        if self.frequency_control % 5 == 0:
 
-            tags = self.at_detector.detect(dis, estimate_tag_pose=self.get_pose, camera_params=self.camera_params, tag_size=0.065) # returns list of detection objects
+            tags = self.at_detector.detect(dis, estimate_tag_pose=True, camera_params=self.camera_params, tag_size=0.065) # returns list of detection objects
 
             detection_threshold = 10 # The target margin need to be larger than this to get labelled.
             
@@ -154,25 +153,33 @@ class AprilTagNode(DTROS):
             else:
                 margin_list = []
                 tag_list = []
-                max_margin = 0
-                max_tag_id = 0
+                max_margin = 10
+                best_tag_id = 0
 
+                the_tag = None
+                min_distance = 1000
 
                 for tag in tags:
                     if tag.decision_margin > max_margin:
-                        max_margin = tag.decision_margin
-                        max_tag_id = tag.tag_id
+                        if tag.pose_t[2][0] < min_distance:
+                            min_distance = tag.pose_t[2][0]
+                            the_tag = tag
+                            best_tag_id = tag.tag_id
 
-                self.pub_tag_id.publish(max_tag_id)
 
-                if self.get_pose :
-                    #print(tag.pose_t,tag.pose_R)
-                    self.transform_camera_view(tag.pose_t,tag.pose_R)
-                    trans = self.buffer.lookup_transform(f"{self.veh}/camera_optical_frame",f"{self.veh}/new_location",time=rospy.Time.now(),timeout=rospy.Duration(1.0))
-                    #print(trans)
+                self.pub_tag_id.publish(best_tag_id)
+                
+                
 
-                if max_tag_id == parking_id:
-                    self.get_pose  = True
+                #print("the_tag",the_tag.tag_id)
+                #print(tag.pose_t,tag.pose_R)
+                #print(the_tag.pose_t,the_tag.pose_R)
+                self.transform_camera_view(the_tag.pose_t,the_tag.pose_R)
+                trans = self.buffer.lookup_transform(f"{self.veh}/footprint",f"{self.veh}/new_location",time=rospy.Time.now(),timeout=rospy.Duration(1.0))
+                #print(trans)
+
+                # if max_tag_id == parking_id:
+                #     self.get_pose  = True
 
                     
 
