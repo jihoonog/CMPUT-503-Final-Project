@@ -30,6 +30,7 @@ from duckietown_msgs.msg import (
     LEDPattern,
     )
 from duckietown_msgs.srv import SetCustomLEDPattern
+from duckietown_msgs.msg import AprilTagDetection, AprilTagDetectionArray
 from std_msgs.msg import Header, Float32, String, Float64MultiArray, Float32MultiArray, Int32, Bool
 from sensor_msgs.msg import CompressedImage, Range
 from geometry_msgs.msg import Point32
@@ -37,7 +38,7 @@ from nav_msgs.msg import Odometry
 from turbojpeg import TurboJPEG 
 import cv2
 import rosbag
-
+import tf2_ros
 
 # Change this before executing
 VERBOSE = 0
@@ -78,16 +79,21 @@ class RobotCircuitNode(DTROS):
 
         ## for stop line detection
         self.stop_distance = 0.15 # distance from the stop line that we should stop
-        self.min_segs = 20  # minimum number of red segments that we should detect to estimate a stop
+        self.min_segs = 15  # minimum number of red segments that we should detect to estimate a stop
         self.off_time = 2.0 # time to wait after we have passed the stop line
         self.max_y = 0.10   # If y value of detected red line is smaller than max_y we will not set at_stop_line true.
-        self.stop_hist_len = 7
+        self.stop_hist_len = 12
         self.stop_duration = 1
         self.stop_cooldown = 6 # The stop cooldown
         self.duckwalk_cooldown = 6
         ## For duckiebot detection and avoidance
         self.safe_distance = 0.7
         self.english_drive_cooldown = 5
+        ## For parking
+        self.parking_ids = [207, 226, 228, 75]
+        ## What stall you are suppose to park at
+        self.parking_stall = 1
+
 
         # Initialize variables
         self.lane_pose = LanePose()
@@ -112,13 +118,14 @@ class RobotCircuitNode(DTROS):
         self.english_driver_time = 0.0
         self.english_driver = False
 
-        
+        ## For parking 
+        self.all_tag_poses = AprilTagDetectionArray().detections 
+
         # Publishers
         ## Publish commands to the motors
         self.pub_motor_commands = rospy.Publisher(f'/{self.veh_name}/wheels_driver_node/wheels_cmd', WheelsCmdStamped, queue_size=1)
         self.pub_car_cmd = rospy.Publisher(f'/{self.veh_name}/car_cmd_switch_node/cmd', Twist2DStamped, queue_size=1)
         self.pub_duckiewalk = rospy.Publisher(f'{self.veh_name}/duckiewalk/image/compressed', CompressedImage, queue_size=1)
-        ## (re)set lane controller parameters
 
         # Subscribers
         ## Subscribe to the lane_pose node
@@ -134,11 +141,14 @@ class RobotCircuitNode(DTROS):
 
         self.sub_range_finder = rospy.Subscriber(f'/{self.veh_name}/front_center_tof_driver_node/range', Range, self.cb_range_finder, queue_size = 1)
         
+        self.sub_all_tag_poses = rospy.Subscriber(f"/{self.veh_name}/all_tag_poses", AprilTagDetectionArray, self.cb_all_tag_poses, queue_size=1)
+
         self.april_tag = -1
 
         rospy.on_shutdown(self.custom_shutdown)
             
         self.log("Initialized")
+
         rospy.sleep(1.0)
         self.lane_pid_controller.reset_controller()
 
@@ -199,6 +209,8 @@ class RobotCircuitNode(DTROS):
             self.tag_id = tag_msg.data
             self.action_done = False
 
+    def cb_all_tag_poses(self, tag_msg):
+        self.all_tag_poses = tag_msg.detections
 
     ## end of callback functions
 
@@ -234,7 +246,6 @@ class RobotCircuitNode(DTROS):
         Callback function that receives a pose message and updates the related control command
         """
         curr_time = rospy.get_time()
-
         stop_time_diff = curr_time - self.stop_time
         duckwalk_time_diff = curr_time - self.duckwalk_time
         english_driver_time_diff = curr_time - self.english_driver_time
@@ -257,6 +268,9 @@ class RobotCircuitNode(DTROS):
             elif self.tag_id in [50, 169]:
                 print("Going left")
                 self.turn_left()
+            elif self.tag_id in [227, 38]:
+                self.do_parking()
+
             else:
                 print("Going straight")
                 self.go_straight()
@@ -276,7 +290,7 @@ class RobotCircuitNode(DTROS):
             print("Vehicle detected")
             self.car_cmd(v, omega)
             rospy.sleep(3.0)
-            print("Changing lanes")
+            print("Going around")
             self.car_cmd(v=0.25, omega=2.0)
             rospy.sleep(1.0)
             self.car_cmd(v=0.25, omega=0.0)
@@ -287,26 +301,7 @@ class RobotCircuitNode(DTROS):
             rospy.sleep(1)
             self.car_cmd(v=0.25, omega=2.0)
             rospy.sleep(1)
-            # self.english_driver_time = curr_time
-            
-            # print("Doing english driver")
-            # self.english_driver = True
-            # self.set_english_driver(True)
             self.lane_pid_controller.reset_controller()
-            
-        # elif self.english_driver and english_driver_time_diff > self.english_drive_cooldown:
-        #     print("Finishing english driver")
-        #     print("Changing lanes")
-        #     self.car_cmd(v=0.25, omega=-2.0)
-        #     rospy.sleep(1.0)
-        #     self.car_cmd(v=0.25, omega=0.0)
-        #     rospy.sleep(2)
-        #     self.car_cmd(v=0.25, omega=1.5)
-        #     rospy.sleep(1)
-        #     self.set_english_driver(False)
-        #     self.english_driver = False
-        #     self.lane_pid_controller.reset_controller()
-        #     print("Doing regular driver")
         else:
             _, omega = self.lane_pid_controller.compute_control_actions(d_err, phi_err, None)
             self.car_cmd(0.25, omega)
@@ -360,6 +355,32 @@ class RobotCircuitNode(DTROS):
         self.duckwalk_time = rospy.get_time()
         print("Done duckwalk")
 
+    def do_parking(self):
+        """Do parking"""
+        print("Doing parking")
+        # while self.vehicle_distance > 0.18:
+        self.get_control_to_tag(tag_id=227, stop_dist=0.25)
+        #     self.car_cmd(v=0.20, omega=0.0)
+        #     self.rate.sleep()
+        # if self.parking_stall == 1:
+        #     self.car_cmd(v=0.0, omega=3)
+        #     rospy.sleep(1)
+
+    def get_control_to_tag(self, tag_id = 227, stop_dist = 0.25):
+        all_tag_poses = self.all_tag_poses
+        for detection in all_tag_poses:
+            if detection.tag_id == tag_id:
+                self.drive_to_tag(detection, stop_dist)
+                return
+        
+
+    def drive_to_tag(self, tag, stop_dist = 0.25):
+        while tag.transform.translation.z > stop_dist:
+            d_err = tag.center[0] - (640.0 / 2.0)
+            omega = self._clamp(d_err / 0.01)
+            print(omega)
+            self.car_cmd(v=0.23, omega=omega)
+        
     def to_lane_frame(self, point):
         p_homo = np.array([point.x, point.y, 1])
         phi = self.lane_pose.phi
@@ -376,6 +397,9 @@ class RobotCircuitNode(DTROS):
         else:
             self.d_offset = 0.0
 
+    def _clamp(self, value, lower=-1, upper=1):
+        return max(lower, min(value, upper))
+
     def custom_shutdown(self):
         """Cleanup function."""
         while not rospy.is_shutdown():
@@ -390,8 +414,8 @@ class RobotCircuitNode(DTROS):
             car_control_msg.omega = 0.0
             self.pub_car_cmd.publish(car_control_msg)
 
-    def shutdown(self, msg):
-        if msg.data=="shutdown":
+    def shutdown(self, msg, override = False):
+        if msg.data=="shutdown" or override:
             motor_cmd = WheelsCmdStamped()
             motor_cmd.header.stamp = rospy.Time.now()
             motor_cmd.vel_left = 0.0
