@@ -284,24 +284,24 @@ class RobotCircuitNode(DTROS):
             rospy.sleep(1.0)
             self.do_duckwalk()
             
-        elif self.vehicle_ahead() and not self.english_driver:
-            v = 0.0
-            omega = 0.0
-            print("Vehicle detected")
-            self.car_cmd(v, omega)
-            rospy.sleep(3.0)
-            print("Going around")
-            self.car_cmd(v=0.25, omega=2.0)
-            rospy.sleep(1.0)
-            self.car_cmd(v=0.25, omega=0.0)
-            rospy.sleep(2.0)
-            self.car_cmd(v=0.25, omega=-2.0)
-            rospy.sleep(2.5)
-            self.car_cmd(v=0.25, omega=0.0)
-            rospy.sleep(1)
-            self.car_cmd(v=0.25, omega=2.0)
-            rospy.sleep(1)
-            self.lane_pid_controller.reset_controller()
+        # elif self.vehicle_ahead() and not self.english_driver:
+        #     v = 0.0
+        #     omega = 0.0
+        #     print("Vehicle detected")
+        #     self.car_cmd(v, omega)
+        #     rospy.sleep(3.0)
+        #     print("Going around")
+        #     self.car_cmd(v=0.25, omega=2.0)
+        #     rospy.sleep(1.0)
+        #     self.car_cmd(v=0.25, omega=0.0)
+        #     rospy.sleep(2.0)
+        #     self.car_cmd(v=0.25, omega=-2.0)
+        #     rospy.sleep(2.5)
+        #     self.car_cmd(v=0.25, omega=0.0)
+        #     rospy.sleep(1)
+        #     self.car_cmd(v=0.25, omega=2.0)
+        #     rospy.sleep(1)
+        #     self.lane_pid_controller.reset_controller()
         else:
             _, omega = self.lane_pid_controller.compute_control_actions(d_err, phi_err, None)
             self.car_cmd(0.25, omega)
@@ -359,28 +359,34 @@ class RobotCircuitNode(DTROS):
         """Do parking"""
         print("Doing parking")
         # while self.vehicle_distance > 0.18:
-        self.get_control_to_tag(tag_id=227, stop_dist=0.25)
+        self.drive_to_tag(227)
+        print("Done parking")
+        rospy.sleep(10)
         #     self.car_cmd(v=0.20, omega=0.0)
         #     self.rate.sleep()
         # if self.parking_stall == 1:
         #     self.car_cmd(v=0.0, omega=3)
         #     rospy.sleep(1)
-
-    def get_control_to_tag(self, tag_id = 227, stop_dist = 0.25):
-        all_tag_poses = self.all_tag_poses
-        for detection in all_tag_poses:
-            if detection.tag_id == tag_id:
-                self.drive_to_tag(detection, stop_dist)
-                return
         
 
-    def drive_to_tag(self, tag, stop_dist = 0.25):
-        while tag.transform.translation.z > stop_dist:
-            d_err = tag.center[0] - (640.0 / 2.0)
-            omega = self._clamp(d_err / 0.01)
-            print(omega)
-            self.car_cmd(v=0.23, omega=omega)
-        
+    def drive_to_tag(self, tag_id, stop_dist = 0.25):
+        while True:
+            target_tag = None
+            all_tags = self.all_tag_poses
+            for tag in all_tags:
+                if tag.tag_id == tag_id:
+                    target_tag = tag
+                    print(target_tag)
+                    if target_tag.transform.translation.x <= stop_dist:
+                        return
+                    
+                    # d_err = tag.transform.translation.y
+                    # _, omega = self.lane_pid_controller.compute_control_actions(d_err, 0, None)
+                    # self.car_cmd(v=0.23, omega=omega)
+                    break
+            self.rate.sleep()
+
+
     def to_lane_frame(self, point):
         p_homo = np.array([point.x, point.y, 1])
         phi = self.lane_pose.phi
@@ -413,6 +419,13 @@ class RobotCircuitNode(DTROS):
             car_control_msg.v - 0.0
             car_control_msg.omega = 0.0
             self.pub_car_cmd.publish(car_control_msg)
+        
+        for i in range(10):
+            car_control_msg = Twist2DStamped()
+            car_control_msg.header.stamp = rospy.Time.now()
+            car_control_msg.v - 0.0
+            car_control_msg.omega = 0.0
+            self.pub_car_cmd.publish(car_control_msg)
 
     def shutdown(self, msg, override = False):
         if msg.data=="shutdown" or override:
@@ -433,4 +446,5 @@ class RobotCircuitNode(DTROS):
 
 if __name__ == '__main__':
     node = RobotCircuitNode(node_name='robot_circuit_node')
+    rospy.on_shutdown(node.custom_shutdown)
     rospy.spin()
