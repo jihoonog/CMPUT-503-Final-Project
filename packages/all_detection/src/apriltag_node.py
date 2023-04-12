@@ -71,7 +71,7 @@ class AprilTagNode(DTROS):
         # initialise the apriltag detector
         self.at_detector = Detector(searchpath=['apriltags'],
                            families='tag36h11',
-                           nthreads=3,
+                           nthreads=1,
                            quad_decimate=2,
                            quad_sigma=0.0,
                            refine_edges=1,
@@ -139,69 +139,65 @@ class AprilTagNode(DTROS):
         # Convert to grey image and distort it.
         dis = self.augmenter.process_image(self.raw_image)
         new_img = dis
+        # if self.frequency_control % 2 == 0:
 
-        if self.frequency_control % 5 == 0:
-            tags = self.at_detector.detect(dis, estimate_tag_pose=True, camera_params=self.camera_params, tag_size=0.065) # returns list of detection objects
+        tags = self.at_detector.detect(dis, estimate_tag_pose=True, camera_params=self.camera_params, tag_size=0.065) # returns list of detection objects
 
-            # print("pre stage 3:", tags)
-            detection_threshold = 10 # The target margin need to be larger than this to get labelled.
-            # print("here")
-            print("tags:",tags)
-            if len(tags) == 0:
-                # Means there's no tags present. Set the led to white.
-                self.pub_tag_id.publish(-1)    
-                #pass
-            else:
-                margin_list = []
-                tag_list = []
-                max_margin = 10
-                best_tag_id = 0
-                the_tag = None
-                min_distance = 1000
-                for tag in tags:
-                    # print("tags:", tag)
-                    if tag.decision_margin > max_margin:
-                        if tag.pose_t[2][0] < min_distance:
-                            min_distance = tag.pose_t[2][0]
-                            the_tag = tag
-                            best_tag_id = tag.tag_id
+        # print("pre stage 3:", tags)
+        detection_threshold = 10 # The target margin need to be larger than this to get labelled.
+        # print("here")
+        if len(tags) == 0:
+            # Means there's no tags present. Set the led to white.
+            self.pub_tag_id.publish(-1)    
+            #pass
+        else:
+            margin_list = []
+            tag_list = []
+            max_margin = 10
+            best_tag_id = 0
+            the_tag = None
+            min_distance = 1000
+            for tag in tags:
+                # print("tags:", tag)
+                if tag.decision_margin > max_margin:
+                    if tag.pose_t[2][0] < min_distance:
+                        min_distance = tag.pose_t[2][0]
+                        the_tag = tag
+                        best_tag_id = tag.tag_id
 
-                print(best_tag_id)
-                self.pub_tag_id.publish(best_tag_id)
-                
-                
-                if best_tag_id in [227, 38]:
-                    self.get_pose  = True
+            self.pub_tag_id.publish(best_tag_id)
+            
+            
+            if best_tag_id in [227, 38]:
+                self.get_pose  = True
 
-            self.frequency_control += 1
+        if self.get_pose:
+            tags_msg = AprilTagDetectionArray()
+            tags_msg.header.stamp = msg.header.stamp
+            tags_msg.header.frame_id = msg.header.frame_id
 
-            # print("Stage 3 tags:", tags)
-            # tags_msg = AprilTagDetectionArray()
-            # tags_msg.header.stamp = msg.header.stamp
-            # tags_msg.header.frame_id = msg.header.frame_id
+            for tag in tags:
 
-            # for tag in tags:
+                if tag.tag_id not in [38, 75, 207, 226, 227, 228]:
+                    continue
+                self.transform_camera_view(tag.pose_t,tag.pose_R)
+                trans = self.buffer.lookup_transform(f"{self.veh}/footprint",f"{self.veh}/new_location",time=rospy.Time.now(),timeout=rospy.Duration(1.0))
+                # print(trans)
+                detection = AprilTagDetection(
+                    transform=trans.transform,
+                    tag_id=tag.tag_id,
+                    hamming=tag.hamming,
+                    decision_margin=tag.decision_margin,
+                    homography=tag.homography.flatten().astype(np.float32).tolist(),
+                    center=tag.center.tolist(),
+                    corners=tag.corners.flatten().tolist(),
+                    pose_error=tag.pose_err,
+                )
+                tags_msg.detections.append(detection)
+            self.pub_all_tag_poses.publish(tags_msg)
 
-            #     if tag.tag_id not in [38, 75, 207, 226, 227, 228]:
-            #         continue
-            #     self.transform_camera_view(tag.pose_t,tag.pose_R)
-            #     trans = self.buffer.lookup_transform(f"{self.veh}/footprint",f"{self.veh}/new_location",time=rospy.Time.now(),timeout=rospy.Duration(1.0))
-            #     # print(trans)
-            #     detection = AprilTagDetection(
-            #         transform=trans.transform,
-            #         tag_id=tag.tag_id,
-            #         hamming=tag.hamming,
-            #         decision_margin=tag.decision_margin,
-            #         homography=tag.homography.flatten().astype(np.float32).tolist(),
-            #         center=tag.center.tolist(),
-            #         corners=tag.corners.flatten().tolist(),
-            #         pose_error=tag.pose_err,
-            #     )
-            #     tags_msg.detections.append(detection)
-            # # print("tagsmsg:",tags_msg)
-            # self.pub_all_tag_poses.publish(tags_msg)
-
-        #self.r.sleep()
+        self.frequency_control += 1
+        self.r.sleep()
 
     def read_params_from_calibration_file(self):
         # Get static parameters

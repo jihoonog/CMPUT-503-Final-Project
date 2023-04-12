@@ -90,7 +90,7 @@ class RobotCircuitNode(DTROS):
         self.safe_distance = 0.7
         self.english_drive_cooldown = 5
         ## For parking
-        self.parking_ids = [207, 226, 228, 75]
+        self.parking_ids = [-1, 207, 226, 228, 75]
         ## What stall you are suppose to park at
         self.parking_stall = 1
 
@@ -107,7 +107,6 @@ class RobotCircuitNode(DTROS):
         self.stop_time = 0.0
         self.process_intersection = False
         self.tag_id = -1
-        self.action_done = False
         ## For duckie detection
         self.duckie_detected = False
         self.process_duckwalk = False
@@ -120,6 +119,7 @@ class RobotCircuitNode(DTROS):
 
         ## For parking 
         self.all_tag_poses = AprilTagDetectionArray().detections 
+        self.approaching_stage_3 = False
 
         # Publishers
         ## Publish commands to the motors
@@ -207,7 +207,8 @@ class RobotCircuitNode(DTROS):
         if tag_msg.data != -1 and tag_msg.data != self.tag_id:
             print("tag_msg",tag_msg)
             self.tag_id = tag_msg.data
-            self.action_done = False
+            if self.tag_id == 38:
+                self.approaching_stage_3 = True
 
     def cb_all_tag_poses(self, tag_msg):
         self.all_tag_poses = tag_msg.detections
@@ -268,9 +269,8 @@ class RobotCircuitNode(DTROS):
             elif self.tag_id in [50, 169]:
                 print("Going left")
                 self.turn_left()
-            elif self.tag_id in [227, 38]:
+            elif self.tag_id in [227, 38] or self.approaching_stage_3:
                 self.do_parking()
-
             else:
                 print("Going straight")
                 self.go_straight()
@@ -313,7 +313,7 @@ class RobotCircuitNode(DTROS):
 
         car_control_msg.v = v
         car_control_msg.omega = omega * 2.0
-        self.pub_car_cmd.publish(car_control_msg)
+        # self.pub_car_cmd.publish(car_control_msg)
     
     def turn_right(self):
         """Make a right turn at an intersection"""
@@ -358,8 +358,23 @@ class RobotCircuitNode(DTROS):
     def do_parking(self):
         """Do parking"""
         print("Doing parking")
-        # while self.vehicle_distance > 0.18:
-        self.drive_to_tag(227)
+        self.lane_pid_controller.reset_controller()
+        if self.parking_stall in [1,3]:
+            self.drive_to_tag(227, 0.2)
+            if self.parking_stall == 1:
+                self.car_cmd(v=0.25, omega=3.5)
+                rospy.sleep(1.0)
+                self.car_cmd(v=0.0, omega=0.0)
+                rospy.sleep(2)
+                self.drive_to_tag(self.parking_ids[self.parking_stall], 0.3)
+            else:
+                self.car_cmd(v=0.25, omega=-3.5)
+                rospy.sleep(1.0)
+                self.car_cmd(v=0.0, omega=0.0)
+                rospy.sleep(2)
+                self.drive_to_tag(self.parking_ids[self.parking_stall], 0.3)
+        else:
+            self.drive_to_tag(227, 0.47)        
         print("Done parking")
         rospy.sleep(10)
         #     self.car_cmd(v=0.20, omega=0.0)
@@ -378,11 +393,14 @@ class RobotCircuitNode(DTROS):
                     target_tag = tag
                     print(target_tag)
                     if target_tag.transform.translation.x <= stop_dist:
+                        self.car_cmd(v=0.0, omega=0.0)
                         return
-                    
-                    # d_err = tag.transform.translation.y
-                    # _, omega = self.lane_pid_controller.compute_control_actions(d_err, 0, None)
-                    # self.car_cmd(v=0.23, omega=omega)
+                    if self.vehicle_distance <= stop_dist:
+                        self.car_cmd(v=0.0, omega=0.0)
+                        return 
+                    d_err = tag.transform.translation.y * 1.5
+                    _, omega = self.lane_pid_controller.compute_control_actions(-d_err, 0, None)
+                    self.car_cmd(v=0.22, omega=omega)
                     break
             self.rate.sleep()
 
