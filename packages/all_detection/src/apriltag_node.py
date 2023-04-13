@@ -50,6 +50,7 @@ class AprilTagNode(DTROS):
         self.augmenter = Augmenter(self.homography,self.camera_info_msg)    
         # Subscribing 
         self.sub_image = rospy.Subscriber( f'/{self.veh}/camera_node/image/compressed',CompressedImage,self.project, queue_size=1)
+        self.sub_shutdown_commands = rospy.Subscriber(f'/{self.veh}/shutdown_cmd', String, self.shutdown, queue_size = 1)
         
         # Publisher
         # Keep this state so you don't need to reset the same color over and over again.
@@ -78,13 +79,12 @@ class AprilTagNode(DTROS):
                            decode_sharpening=0.25,
                            debug=0)
 
-        self.r = rospy.Rate(20) # 30hz
+        self.r = rospy.Rate(30) # 30hz
 
         #rospy.init_node('static_tf2_broadcaster_tag')
         self.buffer = tf2_ros.Buffer()
 
         self.buffer_listener = tf2_ros.TransformListener(self.buffer)
-        self.sub_shutdown_commands = rospy.Subscriber(f'/{self.veh}/all_detection_node/shutdown_cmd', String, self.shutdown, queue_size = 1)
         
         self.get_pose = False
 

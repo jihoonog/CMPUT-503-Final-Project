@@ -82,7 +82,7 @@ class RobotCircuitNode(DTROS):
         self.min_segs = 15  # minimum number of red segments that we should detect to estimate a stop
         self.off_time = 2.0 # time to wait after we have passed the stop line
         self.max_y = 0.10   # If y value of detected red line is smaller than max_y we will not set at_stop_line true.
-        self.stop_hist_len = 12
+        self.stop_hist_len = 10
         self.stop_duration = 1
         self.stop_cooldown = 6 # The stop cooldown
         self.duckwalk_cooldown = 6
@@ -92,7 +92,7 @@ class RobotCircuitNode(DTROS):
         ## For parking
         self.parking_ids = [-1, 207, 226, 228, 75]
         ## What stall you are suppose to park at
-        self.parking_stall = 1
+        self.parking_stall = 4
 
 
         # Initialize variables
@@ -126,15 +126,13 @@ class RobotCircuitNode(DTROS):
         self.pub_motor_commands = rospy.Publisher(f'/{self.veh_name}/wheels_driver_node/wheels_cmd', WheelsCmdStamped, queue_size=1)
         self.pub_car_cmd = rospy.Publisher(f'/{self.veh_name}/car_cmd_switch_node/cmd', Twist2DStamped, queue_size=1)
         self.pub_duckiewalk = rospy.Publisher(f'{self.veh_name}/duckiewalk/image/compressed', CompressedImage, queue_size=1)
-
+        self.pub_shutdown_cmd = rospy.Publisher(f'{self.veh_name}/shutdown_cmd', String, queue_size=1)
         # Subscribers
         ## Subscribe to the lane_pose node
         self.sub_lane_reading = rospy.Subscriber(f"/{self.veh_name}/lane_filter_node/lane_pose", LanePose, self.cb_lane_pose, queue_size = 1)
         self.sub_segment_list = rospy.Subscriber(f"/{self.veh_name}/line_detector_node/segment_list", SegmentList, self.cb_segments, queue_size=1)
         self.sub_tag_id = rospy.Subscriber(f"/{self.veh_name}/tag_id", Int32, self.cb_tag_id, queue_size=1)
 
-        self.sub_shutdown_commands = rospy.Subscriber(f'/{self.veh_name}/number_detection_node/shutdown_cmd', String, self.shutdown, queue_size = 1)
-        
         self.sub_duckie_detected = rospy.Subscriber(f'/{self.veh_name}/all_detection/duckie_detected', Bool, self.cb_duckie_detected, queue_size = 1)
         self.sub_duckiewalk_detected = rospy.Subscriber(f'/{self.veh_name}/all_detection/duckwalk_detected', Bool, self.cb_duckwalk_detected, queue_size = 1)
         self.sub_duckiebot_detected = rospy.Subscriber(f'/{self.veh_name}/all_detection/duckiebot_detected', Bool, self.cb_duckiebot_detected, queue_size = 1)
@@ -284,24 +282,24 @@ class RobotCircuitNode(DTROS):
             rospy.sleep(1.0)
             self.do_duckwalk()
             
-        # elif self.vehicle_ahead() and not self.english_driver:
-        #     v = 0.0
-        #     omega = 0.0
-        #     print("Vehicle detected")
-        #     self.car_cmd(v, omega)
-        #     rospy.sleep(3.0)
-        #     print("Going around")
-        #     self.car_cmd(v=0.25, omega=2.0)
-        #     rospy.sleep(1.0)
-        #     self.car_cmd(v=0.25, omega=0.0)
-        #     rospy.sleep(2.0)
-        #     self.car_cmd(v=0.25, omega=-2.0)
-        #     rospy.sleep(2.5)
-        #     self.car_cmd(v=0.25, omega=0.0)
-        #     rospy.sleep(1)
-        #     self.car_cmd(v=0.25, omega=2.0)
-        #     rospy.sleep(1)
-        #     self.lane_pid_controller.reset_controller()
+        elif self.vehicle_ahead() and not self.english_driver:
+            v = 0.0
+            omega = 0.0
+            print("Vehicle detected")
+            self.car_cmd(v, omega)
+            rospy.sleep(3.0)
+            print("Going around")
+            self.car_cmd(v=0.25, omega=2.0)
+            rospy.sleep(1.0)
+            self.car_cmd(v=0.25, omega=0.0)
+            rospy.sleep(2.0)
+            self.car_cmd(v=0.25, omega=-2.0)
+            rospy.sleep(2.5)
+            self.car_cmd(v=0.25, omega=0.0)
+            rospy.sleep(1)
+            self.car_cmd(v=0.25, omega=2.0)
+            rospy.sleep(1)
+            self.lane_pid_controller.reset_controller()
         else:
             _, omega = self.lane_pid_controller.compute_control_actions(d_err, phi_err, None)
             self.car_cmd(0.25, omega)
@@ -313,7 +311,7 @@ class RobotCircuitNode(DTROS):
 
         car_control_msg.v = v
         car_control_msg.omega = omega * 2.0
-        # self.pub_car_cmd.publish(car_control_msg)
+        self.pub_car_cmd.publish(car_control_msg)
     
     def turn_right(self):
         """Make a right turn at an intersection"""
@@ -359,32 +357,45 @@ class RobotCircuitNode(DTROS):
         """Do parking"""
         print("Doing parking")
         self.lane_pid_controller.reset_controller()
-        if self.parking_stall in [1,3]:
-            self.drive_to_tag(227, 0.2)
-            if self.parking_stall == 1:
-                self.car_cmd(v=0.25, omega=3.5)
-                rospy.sleep(1.0)
-                self.car_cmd(v=0.0, omega=0.0)
-                rospy.sleep(2)
-                self.drive_to_tag(self.parking_ids[self.parking_stall], 0.3)
-            else:
-                self.car_cmd(v=0.25, omega=-3.5)
-                rospy.sleep(1.0)
-                self.car_cmd(v=0.0, omega=0.0)
-                rospy.sleep(2)
-                self.drive_to_tag(self.parking_ids[self.parking_stall], 0.3)
+        if self.parking_stall == 1:
+            self.car_cmd(v=0.25, omega=0.0)
+            rospy.sleep(1.75)
+            self.car_cmd(v=0.25, omega=2.0)
+            rospy.sleep(3.0)
+            self.car_cmd(v=0.0,omega=0.0)
+            rospy.sleep(1)
+            self.drive_to_tag(self.parking_ids[self.parking_stall], stop_dist=0.15)
+        elif self.parking_stall == 2:
+            self.car_cmd(v=0.25, omega=2.00)
+            rospy.sleep(2.1)
+            self.car_cmd(v=0.0,omega=0.0)
+            rospy.sleep(1)
+            self.drive_to_tag(self.parking_ids[self.parking_stall], stop_dist=0.15)
+        elif self.parking_stall == 3:
+            self.car_cmd(v=0.25, omega=0.0)
+            rospy.sleep(1.0)
+            self.car_cmd(v=0.25, omega=-2.25)
+            rospy.sleep(3.0)
+            self.car_cmd(v=0.0,omega=0.0)
+            rospy.sleep(1)
+            self.drive_to_tag(self.parking_ids[self.parking_stall], stop_dist=0.15)
+        elif self.parking_stall == 4:
+            self.car_cmd(v=0.25, omega=0.0)
+            rospy.sleep(1.0)
+            self.car_cmd(v=0.25, omega=-2.25)
+            rospy.sleep(1.5)
+            self.car_cmd(v=0.0,omega=0.0)
+            rospy.sleep(1)
+            self.drive_to_tag(self.parking_ids[self.parking_stall], stop_dist=0.15)
         else:
-            self.drive_to_tag(227, 0.47)        
+            print(f"Parking Stall: {self.parking_stall} is not valid")
         print("Done parking")
-        rospy.sleep(10)
-        #     self.car_cmd(v=0.20, omega=0.0)
-        #     self.rate.sleep()
-        # if self.parking_stall == 1:
-        #     self.car_cmd(v=0.0, omega=3)
-        #     rospy.sleep(1)
-        
+        rospy.sleep(5)
+        self.pub_shutdown_cmd.publish('shutdown')        
+        self.shutdown('shutdown', True)
 
     def drive_to_tag(self, tag_id, stop_dist = 0.25):
+        self.lane_pid_controller.reset_controller()
         while True:
             target_tag = None
             all_tags = self.all_tag_poses
@@ -398,9 +409,10 @@ class RobotCircuitNode(DTROS):
                     if self.vehicle_distance <= stop_dist:
                         self.car_cmd(v=0.0, omega=0.0)
                         return 
-                    d_err = tag.transform.translation.y * 1.5
-                    _, omega = self.lane_pid_controller.compute_control_actions(-d_err, 0, None)
-                    self.car_cmd(v=0.22, omega=omega)
+                    d_err = tag.transform.translation.y * 1.75
+                    omega_err = (0.50 - tag.transform.rotation.z) 
+                    _, omega = self.lane_pid_controller.compute_control_actions(-d_err, omega_err, None)
+                    self.car_cmd(v=0.25, omega=omega)
                     break
             self.rate.sleep()
 
@@ -437,16 +449,9 @@ class RobotCircuitNode(DTROS):
             car_control_msg.v - 0.0
             car_control_msg.omega = 0.0
             self.pub_car_cmd.publish(car_control_msg)
-        
-        for i in range(10):
-            car_control_msg = Twist2DStamped()
-            car_control_msg.header.stamp = rospy.Time.now()
-            car_control_msg.v - 0.0
-            car_control_msg.omega = 0.0
-            self.pub_car_cmd.publish(car_control_msg)
 
     def shutdown(self, msg, override = False):
-        if msg.data=="shutdown" or override:
+        if override:
             motor_cmd = WheelsCmdStamped()
             motor_cmd.header.stamp = rospy.Time.now()
             motor_cmd.vel_left = 0.0
@@ -464,5 +469,4 @@ class RobotCircuitNode(DTROS):
 
 if __name__ == '__main__':
     node = RobotCircuitNode(node_name='robot_circuit_node')
-    rospy.on_shutdown(node.custom_shutdown)
     rospy.spin()

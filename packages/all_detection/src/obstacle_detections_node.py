@@ -2,7 +2,7 @@
 import rospy
 import numpy as np
 from duckietown.dtros import DTROS, NodeType
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, String
 from sensor_msgs.msg import CompressedImage, Image
 import cv2
 from cv_bridge import CvBridge
@@ -41,7 +41,7 @@ class ObstacleDetectionNode(DTROS):
 
         ## Setup subscribers
         self.sub_image = rospy.Subscriber( f'/{self.veh}/camera_node/image/compressed',CompressedImage,self.processImage, queue_size=1)
-
+        self.sub_shutdown_cmd = rospy.Subscriber(f'{self.veh}/shutdown_cmd', String, self.shutdown, queue_size=1)
         ## Setup publishers 
         self.pub_duckie_detected = rospy.Publisher(f'/{self.veh}/all_detection/duckie_detected', Bool, queue_size=1)
         self.pub_duckwalk_detected = rospy.Publisher(f'/{self.veh}/all_detection/duckwalk_detected', Bool, queue_size=1)
@@ -57,6 +57,10 @@ class ObstacleDetectionNode(DTROS):
         params.minDistBetweenBlobs = self.blobdetector_min_dist_between_blobs
         self.simple_blob_detector = cv2.SimpleBlobDetector_create(params)
 
+    def shutdown(self, msg):
+        if msg.data=="shutdown":
+            rospy.signal_shutdown("Apriltag detection Node Shutdown command received")
+            exit()
 
     def detect_duckiebot_tag(self, image):
         duckiebot_detected = False
