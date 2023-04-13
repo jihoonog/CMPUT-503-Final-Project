@@ -126,7 +126,7 @@ class ObstacleDetectionNode(DTROS):
         duckie_detected = False
 
         # Crop for both the duckiewalk and duckie
-        duckie_crop = image[150:-1, 200:450, :]
+        duckie_crop = image[120:-1, 200:450, :]
         # Conver them to HSV
         duckie_hsv = cv2.cvtColor(duckie_crop, cv2.COLOR_BGR2HSV)
         # There are specific for both the duckiewalk and duckie

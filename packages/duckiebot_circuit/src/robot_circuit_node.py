@@ -64,7 +64,7 @@ class RobotCircuitNode(DTROS):
         # Static parameters
         self.update_freq = 20
         self.rate = rospy.Rate(self.update_freq)
-        self.d_offset = 0.0
+        self.d_offset = -0.01
         self.lane_controller_parameters = {
             "Kp_d": 10.0,
             "Ki_d": 1.0,
@@ -87,7 +87,7 @@ class RobotCircuitNode(DTROS):
         self.stop_cooldown = 6 # The stop cooldown
         self.duckwalk_cooldown = 6
         ## For duckiebot detection and avoidance
-        self.safe_distance = 0.7
+        self.safe_distance = 0.65
         self.english_drive_cooldown = 5
         ## For parking
         self.parking_ids = [-1, 207, 226, 228, 75]
@@ -279,7 +279,7 @@ class RobotCircuitNode(DTROS):
             omega = 0.0
             self.car_cmd(v, omega)
             print("Doing duckwalk")
-            rospy.sleep(1.0)
+            rospy.sleep(5.0)
             self.do_duckwalk()
             
         elif self.vehicle_ahead() and not self.english_driver:
@@ -292,7 +292,7 @@ class RobotCircuitNode(DTROS):
             self.car_cmd(v=0.25, omega=2.0)
             rospy.sleep(1.0)
             self.car_cmd(v=0.25, omega=0.0)
-            rospy.sleep(2.0)
+            rospy.sleep(1.7)
             self.car_cmd(v=0.25, omega=-2.0)
             rospy.sleep(2.5)
             self.car_cmd(v=0.25, omega=0.0)
@@ -372,7 +372,7 @@ class RobotCircuitNode(DTROS):
             rospy.sleep(1)
             self.drive_to_tag(self.parking_ids[self.parking_stall], stop_dist=0.15)
         elif self.parking_stall == 3:
-            self.car_cmd(v=0.25, omega=0.0)
+            self.car_cmd(v=0.30, omega=0.0)
             rospy.sleep(1.0)
             self.car_cmd(v=0.25, omega=-2.25)
             rospy.sleep(3.0)
@@ -380,10 +380,10 @@ class RobotCircuitNode(DTROS):
             rospy.sleep(1)
             self.drive_to_tag(self.parking_ids[self.parking_stall], stop_dist=0.15)
         elif self.parking_stall == 4:
-            self.car_cmd(v=0.25, omega=0.0)
-            rospy.sleep(1.0)
-            self.car_cmd(v=0.25, omega=-2.25)
-            rospy.sleep(1.5)
+            self.car_cmd(v=0.30, omega=0.0)
+            rospy.sleep(1.25)
+            self.car_cmd(v=0.25, omega=-2.45)
+            rospy.sleep(1.1)
             self.car_cmd(v=0.0,omega=0.0)
             rospy.sleep(1)
             self.drive_to_tag(self.parking_ids[self.parking_stall], stop_dist=0.15)
@@ -399,6 +399,9 @@ class RobotCircuitNode(DTROS):
         while True:
             target_tag = None
             all_tags = self.all_tag_poses
+            if self.vehicle_distance <= stop_dist:
+                self.car_cmd(v=0.0, omega=0.0)
+                return 
             for tag in all_tags:
                 if tag.tag_id == tag_id:
                     target_tag = tag
@@ -406,10 +409,7 @@ class RobotCircuitNode(DTROS):
                     if target_tag.transform.translation.x <= stop_dist:
                         self.car_cmd(v=0.0, omega=0.0)
                         return
-                    if self.vehicle_distance <= stop_dist:
-                        self.car_cmd(v=0.0, omega=0.0)
-                        return 
-                    d_err = tag.transform.translation.y * 1.75
+                    d_err = tag.transform.translation.y * 1.33
                     omega_err = (0.50 - tag.transform.rotation.z) 
                     _, omega = self.lane_pid_controller.compute_control_actions(-d_err, omega_err, None)
                     self.car_cmd(v=0.25, omega=omega)
@@ -431,7 +431,7 @@ class RobotCircuitNode(DTROS):
         if set_english:
             self.d_offset = 0.20
         else:
-            self.d_offset = 0.0
+            self.d_offset = -0.0
 
     def _clamp(self, value, lower=-1, upper=1):
         return max(lower, min(value, upper))
