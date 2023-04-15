@@ -92,7 +92,7 @@ class RobotCircuitNode(DTROS):
         ## For parking
         self.parking_ids = [-1, 207, 226, 228, 75]
         ## What stall you are suppose to park at
-        self.parking_stall = 4
+        self.parking_stall = 2
 
 
         # Initialize variables
@@ -359,9 +359,9 @@ class RobotCircuitNode(DTROS):
         self.lane_pid_controller.reset_controller()
         if self.parking_stall == 1:
             self.car_cmd(v=0.25, omega=0.0)
-            rospy.sleep(1.75)
+            rospy.sleep(1.5)
             self.car_cmd(v=0.25, omega=2.0)
-            rospy.sleep(3.0)
+            rospy.sleep(2.95)
             self.car_cmd(v=0.0,omega=0.0)
             rospy.sleep(1)
             self.drive_to_tag(self.parking_ids[self.parking_stall], stop_dist=0.15)
@@ -396,6 +396,19 @@ class RobotCircuitNode(DTROS):
 
     def drive_to_tag(self, tag_id, stop_dist = 0.25):
         self.lane_pid_controller.reset_controller()
+        lane_controller_parameters = {
+            "Kp_d": 5.0,
+            "Ki_d": 0.5,
+            "Kd_d": 0.25,
+            "Kp_theta": 3.0,
+            "Ki_theta": 0.25,
+            "Kd_theta": 0.025,
+            "sample_time": 0.05,
+            "d_bounds": (-1.0, 1.0),
+            "theta_bounds": (-1.0,1.0),
+        }
+        parking_pid_controller = LaneController(lane_controller_parameters)
+
         while True:
             target_tag = None
             all_tags = self.all_tag_poses
@@ -409,9 +422,9 @@ class RobotCircuitNode(DTROS):
                     if target_tag.transform.translation.x <= stop_dist:
                         self.car_cmd(v=0.0, omega=0.0)
                         return
-                    d_err = tag.transform.translation.y * 1.33
-                    omega_err = (0.50 - tag.transform.rotation.z) 
-                    _, omega = self.lane_pid_controller.compute_control_actions(-d_err, omega_err, None)
+                    d_err = tag.transform.translation.y * 1.5
+                    omega_err = (0.50 - tag.transform.rotation.z) * 1.5
+                    _, omega = parking_pid_controller.compute_control_actions(-d_err, omega_err, None)
                     self.car_cmd(v=0.25, omega=omega)
                     break
             self.rate.sleep()
