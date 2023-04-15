@@ -13,7 +13,5 @@ First start the lane following pipeline from Ducketown by running
 Then you can run the program by running this at the repo's root:
 
 ```bash
-dts devel build -f -H $BOT && dts devel run -H $BOT
+dts devel build -f && dts devel run -R $BOT
 ```
-
-You must run this project on the robot itself.
